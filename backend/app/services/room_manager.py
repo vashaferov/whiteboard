@@ -401,7 +401,7 @@ class RoomManager:
         objects = list(room.objects)
         seq = room.seq
         try:
-            await self.store.save(room.id, objects, seq)
+            await self.store.save(room.id, objects, seq, [])
         except Exception:  # noqa: BLE001 - persistence must not crash the room
             logger.exception("Failed to save snapshot for room %s", room.id)
             room.dirty = True

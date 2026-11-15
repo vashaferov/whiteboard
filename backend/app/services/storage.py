@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS room_snapshots (
     room_id    TEXT PRIMARY KEY,
     objects    TEXT NOT NULL,
     seq        INTEGER NOT NULL DEFAULT 0,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    workspaces TEXT NOT NULL DEFAULT '[]'
 );
 """
 
@@ -28,6 +29,7 @@ class Snapshot:
     objects: list[dict[str, Any]]
     seq: int
     updated_at: str
+    workspaces: list[dict[str, Any]]
 
 
 class SnapshotStore:
@@ -50,6 +52,15 @@ class SnapshotStore:
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(room_snapshots)")}
+        if "workspaces" not in columns:
+            conn.execute(
+                "ALTER TABLE room_snapshots ADD COLUMN workspaces TEXT NOT NULL DEFAULT '[]'"
+            )
 
     async def load(self, room_id: str) -> Snapshot | None:
         return await asyncio.to_thread(self._load_sync, room_id)
@@ -57,7 +68,8 @@ class SnapshotStore:
     def _load_sync(self, room_id: str) -> Snapshot | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT objects, seq, updated_at FROM room_snapshots WHERE room_id = ?",
+                "SELECT objects, seq, updated_at, workspaces FROM room_snapshots "
+                "WHERE room_id = ?",
                 (room_id,),
             ).fetchone()
         if row is None:
@@ -69,25 +81,45 @@ class SnapshotStore:
             return None
         if not isinstance(objects, list):
             return None
-        return Snapshot(objects=objects, seq=int(row[1]), updated_at=str(row[2]))
+        try:
+            workspaces = json.loads(row[3])
+        except (TypeError, json.JSONDecodeError):
+            workspaces = []
+        if not isinstance(workspaces, list):
+            workspaces = []
+        return Snapshot(
+            objects=objects, seq=int(row[1]), updated_at=str(row[2]), workspaces=workspaces
+        )
 
-    async def save(self, room_id: str, objects: list[dict[str, Any]], seq: int) -> None:
+    async def save(
+        self,
+        room_id: str,
+        objects: list[dict[str, Any]],
+        seq: int,
+        workspaces: list[dict[str, Any]],
+    ) -> None:
         payload = json.dumps(objects, ensure_ascii=False, separators=(",", ":"))
+        workspaces_payload = json.dumps(workspaces, ensure_ascii=False, separators=(",", ":"))
         updated_at = datetime.now(UTC).isoformat()
-        await asyncio.to_thread(self._save_sync, room_id, payload, seq, updated_at)
+        await asyncio.to_thread(
+            self._save_sync, room_id, payload, seq, updated_at, workspaces_payload
+        )
 
-    def _save_sync(self, room_id: str, payload: str, seq: int, updated_at: str) -> None:
+    def _save_sync(
+        self, room_id: str, payload: str, seq: int, updated_at: str, workspaces_payload: str
+    ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO room_snapshots (room_id, objects, seq, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO room_snapshots (room_id, objects, seq, updated_at, workspaces)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(room_id) DO UPDATE SET
                     objects = excluded.objects,
                     seq = excluded.seq,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    workspaces = excluded.workspaces
                 """,
-                (room_id, payload, seq, updated_at),
+                (room_id, payload, seq, updated_at, workspaces_payload),
             )
 
     async def delete_older_than(self, days: int) -> int:
