@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 ROOM_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 OBJECT_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+WORKSPACE_ID_PATTERN = r"^ws_[A-Za-z0-9_-]{1,64}$"
+WORKSPACE_REQUEST_PATTERN = r"^mv_[a-f0-9]{32}$"
 COLOR_PATTERN = r"^#[0-9a-fA-F]{6}$"
 UPLOAD_URL_PATTERN = r"^(?:/uploads/[A-Za-z0-9_.-]{1,128}|https?://[^\s\"']{1,500})$"
 
@@ -32,6 +42,7 @@ class Permissions(BaseModel):
     canClear: bool
     canDelete: bool
     canManageUsers: bool
+    canManageWorkspaces: bool
 
 
 class LoginRequest(BaseModel):
@@ -70,6 +81,7 @@ class _Message(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: str
+    workspaceId: str | None = Field(default=None, pattern=WORKSPACE_ID_PATTERN)
 
 
 class StrokeStart(_Message):
@@ -169,6 +181,80 @@ class Kick(_Message):
     clientId: str = Field(pattern=OBJECT_ID_PATTERN)
 
 
+class WorkspaceSwitch(_Message):
+    type: Literal["workspace_switch"]
+    workspaceId: str = Field(pattern=WORKSPACE_ID_PATTERN)
+
+
+class WorkspaceCreate(_Message):
+    type: Literal["workspace_create"]
+    name: str | None = Field(default=None, min_length=1, max_length=60)
+
+    @field_validator("name")
+    @classmethod
+    def _clean_optional_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Название страницы не может быть пустым")
+        return cleaned
+
+
+class WorkspaceRename(_Message):
+    type: Literal["workspace_rename"]
+    workspaceId: str = Field(pattern=WORKSPACE_ID_PATTERN)
+    name: str = Field(min_length=1, max_length=60)
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Название страницы не может быть пустым")
+        return cleaned
+
+
+class WorkspaceDelete(_Message):
+    type: Literal["workspace_delete"]
+    workspaceId: str = Field(pattern=WORKSPACE_ID_PATTERN)
+
+
+class WorkspaceReorder(_Message):
+    type: Literal["workspace_reorder"]
+    workspaceIds: list[str] = Field(min_length=1, max_length=50)
+
+    @field_validator("workspaceIds")
+    @classmethod
+    def _check_ids(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("Идентификаторы страниц не должны повторяться")
+        for workspace_id in value:
+            if re.fullmatch(WORKSPACE_ID_PATTERN, workspace_id) is None:
+                raise ValueError("Некорректный идентификатор страницы")
+        return value
+
+
+class WorkspacePull(_Message):
+    type: Literal["workspace_pull"]
+    clientIds: list[str] = Field(default_factory=list, max_length=100)
+    all: bool = False
+
+    @model_validator(mode="after")
+    def _check_mode(self) -> WorkspacePull:
+        if self.all == bool(self.clientIds):
+            raise ValueError("Укажите либо all=true, либо непустой clientIds")
+        for client_id in self.clientIds:
+            if re.fullmatch(OBJECT_ID_PATTERN, client_id) is None:
+                raise ValueError("Некорректный идентификатор участника")
+        return self
+
+
+class WorkspaceMoveAck(_Message):
+    type: Literal["workspace_move_ack"]
+    requestId: str = Field(pattern=WORKSPACE_REQUEST_PATTERN)
+
+
 ClientMessage = Annotated[
     StrokeStart
     | StrokePoint
@@ -182,7 +268,14 @@ ClientMessage = Annotated[
     | ObjectDelete
     | Cursor
     | Clear
-    | Kick,
+    | Kick
+    | WorkspaceSwitch
+    | WorkspaceCreate
+    | WorkspaceRename
+    | WorkspaceDelete
+    | WorkspaceReorder
+    | WorkspacePull
+    | WorkspaceMoveAck,
     Field(discriminator="type"),
 ]
 
@@ -196,4 +289,5 @@ def permissions_for(role: str) -> Permissions:
         canClear=is_teacher,
         canDelete=is_teacher,
         canManageUsers=is_teacher,
+        canManageWorkspaces=is_teacher,
     )

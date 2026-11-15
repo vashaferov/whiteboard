@@ -33,6 +33,7 @@ def test_student_login(client: TestClient) -> None:
         "canClear": False,
         "canDelete": False,
         "canManageUsers": False,
+        "canManageWorkspaces": False,
     }
     assert data["token"]
 

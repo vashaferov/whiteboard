@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     snapshot_interval_seconds: float = 2.0
     room_ttl_days: int = 30
     max_objects_per_room: int = 20000
+    max_workspaces_per_room: int = 50
+    workspace_move_timeout_seconds: float = 2.0
     max_message_bytes: int = 262144
 
     rate_limit_points_per_sec: int = 60
