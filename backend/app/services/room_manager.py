@@ -34,6 +34,24 @@ logger = logging.getLogger(__name__)
 ADD_EVENTS = {"shape_add", "text_add", "image_add", "stroke_end"}
 OBJECT_EVENTS = {"object_transform", "text_update"}
 
+# Events whose delivery is filtered by the recipient's current workspace. Room-level
+# structural events (workspace_* metadata, presence) are intentionally absent.
+WORKSPACE_SCOPED_EVENTS = {
+    "stroke_start",
+    "stroke_point",
+    "stroke_end",
+    "shape_add",
+    "text_add",
+    "image_add",
+    "object_update",
+    "object_transform",
+    "text_update",
+    "object_delete",
+    "clear",
+    "cursor",
+    "cursor_remove",
+}
+
 
 def _redis_object_workspace(value: str) -> str | None:
     """Return the ``workspaceId`` stored in a Redis object JSON payload, if any."""
@@ -856,11 +874,13 @@ class RoomManager:
                     await self._handle_remote_pull(room, event)
                     continue
                 await self._apply_remote_event(room, event)
+                scope = (
+                    event.get("workspaceId")
+                    if event.get("type") in WORKSPACE_SCOPED_EVENTS
+                    else None
+                )
                 await self._send_local(
-                    room,
-                    event,
-                    exclude=envelope.get("exclude"),
-                    workspace_id=event.get("workspaceId"),
+                    room, event, exclude=envelope.get("exclude"), workspace_id=scope
                 )
         except asyncio.CancelledError:
             raise

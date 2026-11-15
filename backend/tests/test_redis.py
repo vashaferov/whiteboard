@@ -397,3 +397,65 @@ async def test_redis_clear_and_delete_are_page_scoped(settings, tmp_path, redis_
     assert await first_redis.hget(objects_key, "o-second2") is None
     assert await first_redis.hget(objects_key, "o-default") is not None
     await manager.shutdown()
+
+
+async def test_remote_workspace_renamed_reaches_all_pages(settings, tmp_path, redis_pair) -> None:
+    first_redis, second_redis = redis_pair
+    manager_a = make_manager(settings, tmp_path, "a", first_redis)
+    manager_b = make_manager(settings, tmp_path, "b", second_redis)
+    await manager_a.startup()
+    await manager_b.startup()
+    teacher, _ = make_user("t", "teacher")
+    student, socket_b = make_user("s")
+    room_a = await manager_a.join("lesson", teacher)
+    room_b = await manager_b.join("lesson", student)
+    extra = manager_a.create_workspace(room_a, "Вторая")
+    await manager_a.broadcast(room_a, {"type": "workspace_created", "workspace": extra})
+    await wait_for(lambda: any(m["type"] == "workspace_created" for m in socket_b.messages))
+    # The student is on a different page than the one being renamed.
+    student.workspace_id = extra["id"]
+    socket_b.messages.clear()
+
+    manager_a.rename_workspace(room_a, "ws_default", "Живая")
+    await manager_a.broadcast(
+        room_a,
+        {"type": "workspace_renamed", "workspaceId": "ws_default", "name": "Живая"},
+    )
+
+    await wait_for(lambda: any(m["type"] == "workspace_renamed" for m in socket_b.messages))
+    assert socket_b.messages[-1]["name"] == "Живая"
+    assert room_b.get_workspace("ws_default")["name"] == "Живая"
+    await manager_a.shutdown()
+    await manager_b.shutdown()
+
+
+async def test_remote_workspace_deleted_reaches_user_after_move(
+    settings, tmp_path, redis_pair
+) -> None:
+    first_redis, second_redis = redis_pair
+    manager_a = make_manager(settings, tmp_path, "a", first_redis)
+    manager_b = make_manager(settings, tmp_path, "b", second_redis)
+    await manager_a.startup()
+    await manager_b.startup()
+    teacher, _ = make_user("t", "teacher")
+    student, socket_b = make_user("s")
+    room_a = await manager_a.join("lesson", teacher)
+    await manager_b.join("lesson", student)
+    extra = manager_a.create_workspace(room_a, "Вторая")
+    await manager_a.broadcast(room_a, {"type": "workspace_created", "workspace": extra})
+    await wait_for(lambda: any(m["type"] == "workspace_created" for m in socket_b.messages))
+    student.workspace_id = extra["id"]
+    socket_b.messages.clear()
+
+    manager_a.delete_workspace(room_a, extra["id"])
+    await manager_a.broadcast(
+        room_a,
+        {"type": "workspace_deleted", "workspaceId": extra["id"], "fallbackId": "ws_default"},
+    )
+
+    await wait_for(lambda: any(m["type"] == "workspace_deleted" for m in socket_b.messages))
+    # The student was moved to the fallback page but still received the event.
+    assert student.workspace_id == "ws_default"
+    assert socket_b.messages[-1]["type"] == "workspace_deleted"
+    await manager_a.shutdown()
+    await manager_b.shutdown()
