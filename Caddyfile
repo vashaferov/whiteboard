@@ -1,0 +1,36 @@
+# Автоматический HTTPS: Caddy сам получает сертификат для DOMAIN.
+# Для локального запуска DOMAIN=localhost — Caddy использует внутренний CA.
+{$DOMAIN:localhost} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# Загрузки из S3 (SeaweedFS) отдаёт Caddy, чтобы не публиковать хранилище наружу.
+	# S3_BUCKET должен совпадать со значением в docker-compose.prod.yml.
+	handle_path /media/* {
+		reverse_proxy s3:8333 {
+			rewrite /{$S3_BUCKET:whiteboard}{uri}
+		}
+	}
+
+	handle {
+		reverse_proxy whiteboard:8000 {
+			health_uri /health/ready
+			health_interval 15s
+			health_timeout 5s
+			# WebSocket upgrade Caddy выполняет автоматически.
+		}
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

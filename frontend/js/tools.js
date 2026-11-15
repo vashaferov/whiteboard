@@ -1,0 +1,259 @@
+/**
+ * Инструменты: кисть, ластик, фигуры, текст и выбор.
+ * Локальный оптимистичный рендеринг + отправка событий через onEvent.
+ */
+
+const STROKE_TOOLS = new Set(['brush', 'eraser']);
+const SHAPE_TOOLS = new Set(['rect', 'circle', 'line', 'arrow']);
+const POINT_THROTTLE_MS = 16;
+
+function newId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `o_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+}
+
+function normalizeShape(tool, start, end) {
+  if (tool === 'rect' || tool === 'circle') {
+    return {
+      x: Math.min(start.x, end.x),
+      y: Math.min(start.y, end.y),
+      width: Math.abs(end.x - start.x),
+      height: Math.abs(end.y - start.y),
+    };
+  }
+  return {
+    x: start.x,
+    y: start.y,
+    width: end.x - start.x,
+    height: end.y - start.y,
+  };
+}
+
+export class ToolManager {
+  constructor({ board, onEvent, onCreateText }) {
+    this.board = board;
+    this.stage = board.stage;
+    this.onEvent = onEvent;
+    this.onCreateText = onCreateText;
+
+    this.tool = 'brush';
+    this.color = '#2563eb';
+    this.width = 4;
+    this.stroke = null;
+    this.shape = null;
+    this.lastSentAt = 0;
+
+    this._onPointerDown = (event) => this._handleDown(event);
+    this._onPointerMove = () => this._handleMove();
+    this._onPointerUp = () => this._handleUp();
+
+    this.stage.on('pointerdown', this._onPointerDown);
+    this.stage.on('pointermove', this._onPointerMove);
+    this.stage.on('pointerup', this._onPointerUp);
+    window.addEventListener('pointerup', this._onPointerUp);
+    window.addEventListener('blur', this._onPointerUp);
+  }
+
+  setTool(tool) {
+    if (this.tool === tool) return;
+    this._finishStroke();
+    this._cancelShape();
+    this.tool = tool;
+    this.board.setSelectMode(tool === 'select');
+  }
+
+  setStyle({ color, width }) {
+    if (color) this.color = color;
+    if (width) this.width = width;
+  }
+
+  getTextStyle() {
+    return {
+      color: this.color,
+      fontSize: Math.min(96, Math.max(16, Math.round(this.width * 6))),
+    };
+  }
+
+  isDrawing() {
+    return Boolean(this.stroke || this.shape);
+  }
+
+  _handleDown(event) {
+    const nativeEvent = event.evt;
+    if (nativeEvent && typeof nativeEvent.button === 'number' && nativeEvent.button !== 0) {
+      return;
+    }
+    if (this.tool === 'select') return;
+
+    const point = this.board.getPointer();
+    if (!point) return;
+
+    if (STROKE_TOOLS.has(this.tool)) {
+      this._startStroke(point);
+    } else if (SHAPE_TOOLS.has(this.tool)) {
+      this.shape = { start: point, end: point };
+      this._drawShapePreview();
+    } else if (this.tool === 'text') {
+      this.onCreateText(point);
+    }
+  }
+
+  _handleMove() {
+    if (this.stroke) {
+      const point = this.board.getPointer();
+      if (!point) return;
+      this.stroke.points.push([point.x, point.y]);
+      this.board.appendStrokePoint(this.stroke.id, [point.x, point.y]);
+
+      const now = performance.now();
+      if (now - this.lastSentAt >= POINT_THROTTLE_MS) {
+        this.lastSentAt = now;
+        this._sendStrokePoint(point);
+        this.stroke.sentCount = this.stroke.points.length;
+      }
+      return;
+    }
+
+    if (this.shape) {
+      const point = this.board.getPointer();
+      if (!point) return;
+      this.shape.end = point;
+      this._drawShapePreview();
+    }
+  }
+
+  _handleUp() {
+    if (this.stroke) {
+      this._finishStroke();
+    }
+    if (this.shape) {
+      this._finishShape();
+    }
+  }
+
+  // ------------------------------------------------------------------ strokes
+
+  _startStroke(point) {
+    const id = newId();
+    this.stroke = {
+      id,
+      points: [[point.x, point.y]],
+      sentCount: 0,
+      tool: this.tool,
+      color: this.color,
+      width: this.width,
+    };
+    this.lastSentAt = performance.now();
+
+    this.board.addObject({
+      id,
+      type: 'stroke',
+      tool: this.tool,
+      color: this.color,
+      width: this.width,
+      points: [[point.x, point.y]],
+    });
+    this.onEvent({
+      type: 'stroke_start',
+      objectId: id,
+      tool: this.tool,
+      color: this.color,
+      width: this.width,
+      point: { x: point.x, y: point.y },
+    });
+    this.stroke.sentCount = 1;
+  }
+
+  _sendStrokePoint(point) {
+    if (!this.stroke) return;
+    this.onEvent({
+      type: 'stroke_point',
+      objectId: this.stroke.id,
+      point: { x: point.x, y: point.y },
+    });
+  }
+
+  _finishStroke() {
+    const stroke = this.stroke;
+    if (!stroke) return;
+    this.stroke = null;
+
+    // Досылаем точки, которые не попали в троттлинг, чтобы у остальных линия не обрывалась.
+    for (let index = stroke.sentCount; index < stroke.points.length; index += 1) {
+      const [x, y] = stroke.points[index];
+      this.onEvent({
+        type: 'stroke_point',
+        objectId: stroke.id,
+        point: { x, y },
+      });
+    }
+    this.onEvent({ type: 'stroke_end', objectId: stroke.id });
+  }
+
+  // ------------------------------------------------------------------- shapes
+
+  _drawShapePreview() {
+    if (!this.shape) return;
+    const geometry = normalizeShape(this.tool, this.shape.start, this.shape.end);
+    const object = {
+      type: 'shape',
+      shapeType: this.tool,
+      ...geometry,
+      color: this.color,
+      strokeWidth: this.width,
+      fill: null,
+    };
+    if (!this.previewStarted) {
+      this.board.showShapePreview(object);
+      this.previewStarted = true;
+    } else {
+      this.board.updateShapePreview(object);
+    }
+  }
+
+  _finishShape() {
+    const shape = this.shape;
+    this.shape = null;
+    this.previewStarted = false;
+    this.board.hideShapePreview();
+    if (!shape) return;
+
+    const geometry = normalizeShape(this.tool, shape.start, shape.end);
+    if (Math.abs(geometry.width) < 3 && Math.abs(geometry.height) < 3) return;
+
+    const id = newId();
+    const object = {
+      id,
+      type: 'shape',
+      shapeType: this.tool,
+      ...geometry,
+      color: this.color,
+      strokeWidth: this.width,
+      fill: null,
+    };
+    this.board.addObject(object);
+    this.onEvent({
+      type: 'shape_add',
+      objectId: id,
+      shapeType: this.tool,
+      ...geometry,
+      color: this.color,
+      strokeWidth: this.width,
+      fill: null,
+    });
+  }
+
+  _cancelShape() {
+    this.shape = null;
+    this.previewStarted = false;
+    this.board.hideShapePreview();
+  }
+
+  destroy() {
+    this.stage.off('pointerdown', this._onPointerDown);
+    this.stage.off('pointermove', this._onPointerMove);
+    this.stage.off('pointerup', this._onPointerUp);
+    window.removeEventListener('pointerup', this._onPointerUp);
+    window.removeEventListener('blur', this._onPointerUp);
+  }
+}
