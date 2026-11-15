@@ -459,3 +459,55 @@ async def test_remote_workspace_deleted_reaches_user_after_move(
     assert socket_b.messages[-1]["type"] == "workspace_deleted"
     await manager_a.shutdown()
     await manager_b.shutdown()
+
+
+async def test_finalized_stroke_end_is_workspace_scoped(settings, tmp_path, redis_pair) -> None:
+    first_redis, second_redis = redis_pair
+    manager_a = make_manager(settings, tmp_path, "a", first_redis)
+    manager_b = make_manager(settings, tmp_path, "b", second_redis)
+    await manager_a.startup()
+    await manager_b.startup()
+
+    owner, owner_socket = make_user("u-a")
+    other_page, other_socket = make_user("u-b")
+    same_page, same_socket = make_user("u-c")
+
+    room_a = await manager_a.join("lesson", owner)
+    room_b = await manager_b.join("lesson", other_page)
+    await manager_b.join("lesson", same_page)
+
+    second = manager_a.create_workspace(room_a, "Вторая")
+    await manager_a.broadcast(room_a, {"type": "workspace_created", "workspace": second})
+    await wait_for(lambda: room_b.get_workspace(second["id"]) is not None)
+
+    owner.workspace_id = "ws_default"
+    other_page.workspace_id = second["id"]
+    same_page.workspace_id = "ws_default"
+
+    owner.strokes["s1"] = {
+        "id": "s1",
+        "type": "stroke",
+        "author": "u-a",
+        "workspaceId": "ws_default",
+        "points": [[1, 2], [3, 4]],
+        "tool": "brush",
+        "color": "#123456",
+        "width": 4,
+    }
+    owner_socket.messages.clear()
+    other_socket.messages.clear()
+    same_socket.messages.clear()
+
+    assert await manager_a.switch_workspace(room_a, owner, second["id"]) is True
+
+    # A same-page viewer receives the finalized stroke with its workspace id.
+    await wait_for(lambda: any(m["type"] == "stroke_end" for m in same_socket.messages))
+    stroke_end = next(m for m in same_socket.messages if m["type"] == "stroke_end")
+    assert stroke_end["object"]["id"] == "s1"
+    assert stroke_end["workspaceId"] == "ws_default"
+
+    # The other-page user must not receive the finalized stroke.
+    assert all(m["type"] != "stroke_end" for m in other_socket.messages)
+
+    await manager_a.shutdown()
+    await manager_b.shutdown()

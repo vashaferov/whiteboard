@@ -701,6 +701,9 @@ async def _handle_workspace_delete(
     if user.role != "teacher":
         await manager.send_to(user, _error("forbidden", "Удалять страницы может только учитель"))
         return
+    if room.get_workspace(message.workspaceId) is None:
+        await manager.send_to(user, _error("workspace_not_found", "Страница не найдена"))
+        return
     deleted, fallback = manager.delete_workspace(room, message.workspaceId)
     if deleted is None:
         await manager.send_to(user, _error("last_workspace", "Нельзя удалить последнюю страницу"))

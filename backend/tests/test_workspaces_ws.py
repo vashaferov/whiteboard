@@ -181,6 +181,16 @@ def test_delete_last_workspace_is_rejected(client: TestClient, login_user, ws_ur
         assert error["code"] == "last_workspace"
 
 
+def test_delete_unknown_workspace_is_rejected(client: TestClient, login_user, ws_url) -> None:
+    teacher = login_user("Учитель", "teacher")
+
+    with ws_connect(client, ws_url, teacher["token"]) as (teacher_ws, _):
+        teacher_ws.send_json({"type": "workspace_delete", "workspaceId": "ws_missing"})
+        error = teacher_ws.receive_json()
+        assert error["type"] == "error"
+        assert error["code"] == "workspace_not_found"
+
+
 def test_delete_workspace_moves_viewers_to_fallback(client: TestClient, login_user, ws_url) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")

@@ -454,11 +454,17 @@ class RoomManager:
                 continue
             if len(room.objects) >= self.settings.max_objects_per_room:
                 break
-            self.add_object(room, obj, obj.get("workspaceId"))
+            workspace_id = obj.get("workspaceId") or room.workspace_ids()[0]
+            self.add_object(room, obj, workspace_id)
             await self.broadcast(
                 room,
-                {"type": "stroke_end", "id": user.id, "object": obj},
-                workspace_id=obj.get("workspaceId"),
+                {
+                    "type": "stroke_end",
+                    "id": user.id,
+                    "object": obj,
+                    "workspaceId": workspace_id,
+                },
+                workspace_id=workspace_id,
             )
 
     @staticmethod
