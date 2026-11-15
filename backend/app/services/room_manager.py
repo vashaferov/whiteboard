@@ -21,6 +21,13 @@ from typing import Any, Protocol
 from app.config import Settings
 from app.services.images import ImageStorage, LocalImageStorage
 from app.services.storage import SnapshotStore
+from app.services.workspaces import (
+    DEFAULT_WORKSPACE_ID,
+    assign_orphan_objects,
+    new_workspace_id,
+    next_workspace_name,
+    normalize_workspaces,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +73,9 @@ class ConnectedUser:
     websocket: SupportsSend
     limiter: RateLimiter
     strokes: dict[str, dict[str, Any]] = field(default_factory=dict)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
+    state_version: int = 0
+    workspace_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def public(self) -> dict[str, str]:
         return {
@@ -80,7 +90,11 @@ class Room:
     """A single lesson room with connected users and finished objects."""
 
     def __init__(
-        self, room_id: str, objects: list[dict[str, Any]] | None = None, seq: int = 0
+        self,
+        room_id: str,
+        objects: list[dict[str, Any]] | None = None,
+        seq: int = 0,
+        workspaces: list[dict[str, Any]] | None = None,
     ) -> None:
         self.id = room_id
         self.users: dict[str, ConnectedUser] = {}
@@ -89,6 +103,9 @@ class Room:
             str(obj["id"]): obj for obj in self.objects if isinstance(obj, dict) and "id" in obj
         }
         self.seq = seq
+        self.workspaces: dict[str, dict[str, Any]] = {
+            workspace["id"]: workspace for workspace in normalize_workspaces(workspaces)
+        }
         self.dirty = False
         self.last_active = time.monotonic()
         self.save_task: asyncio.Task[None] | None = None
@@ -120,6 +137,55 @@ class Room:
     def clear(self) -> None:
         self.objects.clear()
         self.index.clear()
+
+    # --------------------------------------------------------------- workspaces
+
+    def workspace_list(self) -> list[dict[str, Any]]:
+        """Return workspaces as a position-sorted copy of their dicts."""
+        ordered = sorted(self.workspaces.values(), key=lambda workspace: workspace["position"])
+        return [dict(workspace) for workspace in ordered]
+
+    def workspace_ids(self) -> list[str]:
+        return [workspace["id"] for workspace in self.workspace_list()]
+
+    def get_workspace(self, workspace_id: str) -> dict[str, Any] | None:
+        return self.workspaces.get(workspace_id)
+
+    def add_workspace(self, name: str) -> dict[str, Any]:
+        workspace = {"id": new_workspace_id(), "name": name, "position": len(self.workspaces)}
+        self.workspaces[workspace["id"]] = workspace
+        return workspace
+
+    def rename_workspace(self, workspace_id: str, name: str) -> dict[str, Any] | None:
+        workspace = self.workspaces.get(workspace_id)
+        if workspace is None:
+            return None
+        workspace["name"] = name
+        return workspace
+
+    def delete_workspace(self, workspace_id: str) -> tuple[dict[str, Any] | None, str | None]:
+        workspace = self.workspaces.get(workspace_id)
+        if workspace is None or len(self.workspaces) <= 1:
+            return None, None
+        removed = self.workspaces.pop(workspace_id)
+        self.clear_workspace(workspace_id)
+        remaining = self.workspace_ids()
+        return removed, remaining[0] if remaining else None
+
+    def reorder_workspaces(self, ids: list[str]) -> bool:
+        if set(ids) != set(self.workspaces):
+            return False
+        for position, workspace_id in enumerate(ids):
+            self.workspaces[workspace_id]["position"] = position
+        return True
+
+    def objects_in(self, workspace_id: str) -> list[dict[str, Any]]:
+        return [obj for obj in self.objects if obj.get("workspaceId") == workspace_id]
+
+    def clear_workspace(self, workspace_id: str) -> None:
+        for obj in self.objects_in(workspace_id):
+            self.index.pop(str(obj["id"]), None)
+        self.objects = [obj for obj in self.objects if obj.get("workspaceId") != workspace_id]
 
 
 class RoomManager:
@@ -187,6 +253,11 @@ class RoomManager:
                 room.objects = restored
                 room.index = {str(obj["id"]): obj for obj in restored}
                 room.seq = snapshot.seq
+                room.workspaces = {
+                    workspace["id"]: workspace
+                    for workspace in normalize_workspaces(snapshot.workspaces)
+                }
+                assign_orphan_objects(room.workspace_list(), room.objects)
                 logger.info("Restored room %s with %s objects", room_id, len(restored))
             if self._redis is not None:
                 await self._restore_redis_state(room)
@@ -277,8 +348,11 @@ class RoomManager:
         message: dict[str, Any],
         *,
         exclude: str | None = None,
+        workspace_id: str | None = None,
     ) -> None:
-        await self._send_local(room, message, exclude=exclude)
+        if workspace_id is None:
+            workspace_id = message.get("workspaceId")
+        await self._send_local(room, message, exclude=exclude, workspace_id=workspace_id)
         if self._redis is not None:
             try:
                 await self._sync_redis_event(room, message)
@@ -292,10 +366,13 @@ class RoomManager:
         message: dict[str, Any],
         *,
         exclude: str | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         dead: list[str] = []
         for user in list(room.users.values()):
             if user.id == exclude:
+                continue
+            if workspace_id is not None and user.workspace_id != workspace_id:
                 continue
             if not await self.send_to(user, message):
                 dead.append(user.id)
@@ -330,8 +407,12 @@ class RoomManager:
                 continue
             if len(room.objects) >= self.settings.max_objects_per_room:
                 break
-            self.add_object(room, obj)
-            await self.broadcast(room, {"type": "stroke_end", "id": user.id, "object": obj})
+            self.add_object(room, obj, obj.get("workspaceId"))
+            await self.broadcast(
+                room,
+                {"type": "stroke_end", "id": user.id, "object": obj},
+                workspace_id=obj.get("workspaceId"),
+            )
 
     @staticmethod
     async def _close_quietly(websocket: SupportsSend, code: int, reason: str) -> None:
@@ -340,7 +421,12 @@ class RoomManager:
 
     # ---------------------------------------------------------------- room state
 
-    def add_object(self, room: Room, obj: dict[str, Any]) -> dict[str, Any]:
+    def add_object(
+        self, room: Room, obj: dict[str, Any], workspace_id: str | None = None
+    ) -> dict[str, Any]:
+        if workspace_id is None:
+            workspace_id = room.workspace_ids()[0]
+        obj["workspaceId"] = workspace_id
         room.add_object(obj)
         self.mark_dirty(room)
         return obj
@@ -366,9 +452,102 @@ class RoomManager:
             self.mark_dirty(room)
         return obj
 
-    def clear_room(self, room: Room) -> None:
-        room.clear()
+    def clear_room(self, room: Room, workspace_id: str | None = None) -> None:
+        if workspace_id is None:
+            workspace_id = room.workspace_ids()[0]
+        room.clear_workspace(workspace_id)
         self.mark_dirty(room)
+
+    def objects_for(self, room: Room, workspace_id: str) -> list[dict[str, Any]]:
+        return room.objects_in(workspace_id)
+
+    def create_workspace(self, room: Room, name: str | None = None) -> dict[str, Any]:
+        if name is None:
+            name = next_workspace_name(room.workspace_list())
+        workspace = room.add_workspace(name)
+        self.mark_dirty(room)
+        return workspace
+
+    def rename_workspace(self, room: Room, workspace_id: str, name: str) -> dict[str, Any] | None:
+        workspace = room.rename_workspace(workspace_id, name)
+        if workspace is not None:
+            self.mark_dirty(room)
+        return workspace
+
+    def delete_workspace(
+        self, room: Room, workspace_id: str
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        for user in list(room.users.values()):
+            for stroke_id in [
+                sid
+                for sid, stroke in user.strokes.items()
+                if stroke.get("workspaceId") == workspace_id
+            ]:
+                user.strokes.pop(stroke_id, None)
+        deleted, fallback = room.delete_workspace(workspace_id)
+        if deleted is not None:
+            self.mark_dirty(room)
+        return deleted, fallback
+
+    def reorder_workspaces(self, room: Room, ids: list[str]) -> bool:
+        if not room.reorder_workspaces(ids):
+            return False
+        self.mark_dirty(room)
+        return True
+
+    async def switch_workspace(
+        self,
+        room: Room,
+        user: ConnectedUser,
+        workspace_id: str,
+        *,
+        reason: str = "switch",
+        by: str | None = None,
+    ) -> bool:
+        if room.get_workspace(workspace_id) is None:
+            return False
+        async with user.workspace_lock:
+            old_id = user.workspace_id
+            if old_id == workspace_id:
+                user.state_version += 1
+                await self.send_to(
+                    user,
+                    {
+                        "type": "workspace_state",
+                        "workspaceId": workspace_id,
+                        "objects": self.objects_for(room, workspace_id),
+                        "stateVersion": user.state_version,
+                    },
+                )
+                return True
+            await self.broadcast(
+                room,
+                {"type": "cursor_remove", "id": user.id},
+                workspace_id=old_id,
+            )
+            await self._finalize_strokes(room, user)
+            user.workspace_id = workspace_id
+            user.state_version += 1
+            if reason == "pull":
+                await self.send_to(
+                    user,
+                    {"type": "workspace_moved", "workspaceId": workspace_id, "by": by},
+                )
+            await self.send_to(
+                user,
+                {
+                    "type": "workspace_state",
+                    "workspaceId": workspace_id,
+                    "objects": self.objects_for(room, workspace_id),
+                    "stateVersion": user.state_version,
+                },
+            )
+        return True
+
+    async def move_users_from_deleted(self, room: Room, deleted_id: str, fallback_id: str) -> None:
+        for user in list(room.users.values()):
+            if user.workspace_id == deleted_id:
+                await self.switch_workspace(room, user, fallback_id, reason="delete")
 
     def has_capacity(self, room: Room) -> bool:
         return len(room.objects) < self.settings.max_objects_per_room
@@ -400,8 +579,9 @@ class RoomManager:
         room.dirty = False
         objects = list(room.objects)
         seq = room.seq
+        workspaces = room.workspace_list()
         try:
-            await self.store.save(room.id, objects, seq, [])
+            await self.store.save(room.id, objects, seq, workspaces)
         except Exception:  # noqa: BLE001 - persistence must not crash the room
             logger.exception("Failed to save snapshot for room %s", room.id)
             room.dirty = True
