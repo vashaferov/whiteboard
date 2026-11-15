@@ -103,8 +103,10 @@ async def test_objects_and_presence_are_shared(settings: Settings, tmp_path, red
         "fill": "#ffffff",
         "strokeWidth": 2,
     }
-    manager_a.add_object(room_a, obj)
-    await manager_a.broadcast(room_a, {"type": "shape_add", "id": "u-a", "object": obj})
+    manager_a.add_object(room_a, obj, "ws_default")
+    await manager_a.broadcast(
+        room_a, {"type": "shape_add", "id": "u-a", "workspaceId": "ws_default", "object": obj}
+    )
 
     await wait_for(lambda: room_b.get_object("shape-1") is not None)
     assert websocket_b.messages[-1]["type"] == "shape_add"
@@ -112,7 +114,12 @@ async def test_objects_and_presence_are_shared(settings: Settings, tmp_path, red
     manager_a.update_object_fields(room_a, "shape-1", x=75, rotation=30)
     await manager_a.broadcast(
         room_a,
-        {"type": "object_transform", "id": "u-a", "object": room_a.get_object("shape-1")},
+        {
+            "type": "object_transform",
+            "id": "u-a",
+            "workspaceId": "ws_default",
+            "object": room_a.get_object("shape-1"),
+        },
     )
     await wait_for(lambda: room_b.get_object("shape-1")["x"] == 75)
     assert room_b.get_object("shape-1")["rotation"] == 30
@@ -127,9 +134,15 @@ async def test_objects_and_presence_are_shared(settings: Settings, tmp_path, red
     room_c = await manager_c.get_or_create("shared")
     assert room_c.objects == []
 
-    manager_a.add_object(room_a, {**obj, "id": "shape-2"})
+    manager_a.add_object(room_a, {**obj, "id": "shape-2"}, "ws_default")
     await manager_a.broadcast(
-        room_a, {"type": "shape_add", "id": "u-a", "object": room_a.get_object("shape-2")}
+        room_a,
+        {
+            "type": "shape_add",
+            "id": "u-a",
+            "workspaceId": "ws_default",
+            "object": room_a.get_object("shape-2"),
+        },
     )
     await wait_for_hash_field(first_redis, "whiteboard:room:shared:objects", "shape-2")
 
@@ -207,3 +220,83 @@ async def test_redis_unavailable_falls_back_to_memory(
     assert room.users["u-a"] is user
     assert [user["id"] for user in await manager.list_users(room)] == ["u-a"]
     await manager.shutdown()
+
+
+async def test_empty_redis_is_seeded_from_snapshot(settings, tmp_path, redis_pair) -> None:
+    first_redis, second_redis = redis_pair
+    manager_a = make_manager(settings, tmp_path, "a", first_redis)
+    await manager_a.startup()
+    room = await manager_a.get_or_create("shared")
+    extra = manager_a.create_workspace(room, "Вторая")
+    await manager_a.broadcast(room, {"type": "workspace_created", "workspace": extra})
+    manager_a.add_object(room, {"id": "o1", "type": "shape"}, extra["id"])
+    await manager_a.broadcast(
+        room, {"type": "shape_add", "workspaceId": extra["id"], "object": room.get_object("o1")}
+    )
+    await wait_for_hash_field(first_redis, "whiteboard:room:shared:workspaces", extra["id"])
+
+    manager_b = make_manager(settings, tmp_path, "b", second_redis)
+    await manager_b.startup()
+    room_b = await manager_b.get_or_create("shared")
+    assert room_b.workspace_ids() == ["ws_default", extra["id"]]
+    assert room_b.get_object("o1")["workspaceId"] == extra["id"]
+    await manager_a.shutdown()
+    await manager_b.shutdown()
+
+
+async def test_redis_workspaces_beat_stale_sqlite(settings, tmp_path, redis_pair) -> None:
+    first_redis, second_redis = redis_pair
+    store = SnapshotStore(tmp_path / "snap.db")
+    await store.save(
+        "shared",
+        [{"id": "old", "workspaceId": "ws_default"}],
+        1,
+        [{"id": "ws_default", "name": "Старая", "position": 0}],
+    )
+    manager_a = RoomManager(settings, store, redis_client=first_redis)
+    await manager_a.startup()
+    room_a = await manager_a.get_or_create("shared")
+    manager_a.rename_workspace(room_a, "ws_default", "Живая")
+    await manager_a.broadcast(
+        room_a,
+        {
+            "type": "workspace_renamed",
+            "workspaceId": "ws_default",
+            "name": "Живая",
+        },
+    )
+    extra = manager_a.create_workspace(room_a, "Новая")
+    await manager_a.broadcast(room_a, {"type": "workspace_created", "workspace": extra})
+
+    manager_b = RoomManager(settings, store, redis_client=second_redis)
+    await manager_b.startup()
+    room_b = await manager_b.get_or_create("shared")
+    assert room_b.workspace_ids() == ["ws_default", extra["id"]]
+    assert room_b.workspace_list()[0]["name"] == "Живая"
+    await manager_a.shutdown()
+    await manager_b.shutdown()
+
+
+async def test_remote_pull_prepares_on_owner_instance(settings, tmp_path, redis_pair) -> None:
+    first_redis, second_redis = redis_pair
+    manager_a = make_manager(settings, tmp_path, "a", first_redis)
+    manager_b = make_manager(settings, tmp_path, "b", second_redis)
+    await manager_a.startup()
+    await manager_b.startup()
+    teacher, _ = make_user("t", "teacher")
+    student, socket_b = make_user("s")
+    room_a = await manager_a.join("lesson", teacher)
+    room_b = await manager_b.join("lesson", student)
+    extra = manager_a.create_workspace(room_a, "Вторая")
+    await manager_a.broadcast(room_a, {"type": "workspace_created", "workspace": extra})
+    await wait_for_hash_field(first_redis, "whiteboard:room:lesson:workspaces", extra["id"])
+    teacher.workspace_id = extra["id"]
+    socket_b.messages.clear()
+
+    assert await manager_a.pull_users(room_a, teacher, client_ids=["s"], all=False) == 1
+    await wait_for(lambda: any(m["type"] == "workspace_prepare_move" for m in socket_b.messages))
+    prepare = next(m for m in socket_b.messages if m["type"] == "workspace_prepare_move")
+    await manager_b.handle_move_ack(room_b, student, prepare["requestId"])
+    assert student.workspace_id == extra["id"]
+    await manager_a.shutdown()
+    await manager_b.shutdown()

@@ -35,6 +35,18 @@ ADD_EVENTS = {"shape_add", "text_add", "image_add", "stroke_end"}
 OBJECT_EVENTS = {"object_transform", "text_update"}
 
 
+def _redis_object_workspace(value: str) -> str | None:
+    """Return the ``workspaceId`` stored in a Redis object JSON payload, if any."""
+    try:
+        obj = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(obj, dict):
+        workspace_id = obj.get("workspaceId")
+        return workspace_id if isinstance(workspace_id, str) else None
+    return None
+
+
 class SupportsSend(Protocol):
     async def send_json(self, data: Any) -> None: ...  # pragma: no cover - protocol
 
@@ -275,8 +287,8 @@ class RoomManager:
                 }
                 assign_orphan_objects(room.workspace_list(), room.objects)
                 logger.info("Restored room %s with %s objects", room_id, len(restored))
-            if self._redis is not None:
-                await self._restore_redis_state(room)
+            if self._redis is not None and not await self._restore_redis_state(room):
+                await self._seed_redis_state(room)
             self.rooms[room_id] = room
             if self._redis is not None:
                 await self._start_room_tasks(room)
@@ -369,7 +381,7 @@ class RoomManager:
         await self._send_local(room, message, exclude=exclude, workspace_id=workspace_id)
         if self._redis is not None:
             try:
-                await self._sync_redis_event(room, message)
+                await self._sync_redis_event(room, message, workspace_id=workspace_id)
                 await self._publish(room.id, {"event": message, "exclude": exclude})
             except Exception:  # noqa: BLE001 - Redis must not break local lessons
                 logger.exception("Failed to publish %s for room %s", message.get("type"), room.id)
@@ -618,19 +630,40 @@ class RoomManager:
     async def pull_users(
         self, room: Room, teacher: ConnectedUser, *, client_ids: list[str], all: bool
     ) -> int:
-        """Prepare a move for the selected local students. Returns the number of targets."""
+        """Prepare a move for the selected students across instances.
+
+        Uses the merged roster (local users + Redis presence). Local students receive
+        ``prepare_move``; remote students are targeted via a published
+        ``remote_workspace_pull`` event. Returns the number of valid merged targets
+        (``0`` means the WS layer should send ``user_not_found``).
+        """
         workspace_id = teacher.workspace_id
         if room.get_workspace(workspace_id) is None:
             return 0
-        targets: list[ConnectedUser] = []
-        for user in room.users.values():
-            if user.role != "student" or user.id == teacher.id:
+        roster = await self.list_users(room)
+        local: list[ConnectedUser] = []
+        remote_ids: list[str] = []
+        for entry in roster:
+            user_id = entry.get("id")
+            if entry.get("role") != "student" or user_id == teacher.id:
                 continue
-            if all or user.id in client_ids:
-                targets.append(user)
-        for user in targets:
+            if not (all or user_id in client_ids):
+                continue
+            user = room.users.get(user_id)
+            if user is not None:
+                local.append(user)
+            else:
+                remote_ids.append(user_id)
+        for user in local:
             await self.prepare_move(room, user, workspace_id, by=teacher.id)
-        return len(targets)
+        if self._redis is not None and remote_ids:
+            payload: dict[str, Any] = {"workspaceId": workspace_id, "by": teacher.id}
+            if all:
+                payload["all"] = True
+            else:
+                payload["clientIds"] = remote_ids
+            await self._publish(room.id, {"event": {"type": "remote_workspace_pull", **payload}})
+        return len(local) + len(remote_ids)
 
     async def move_users_from_deleted(self, room: Room, deleted_id: str, fallback_id: str) -> None:
         for user in list(room.users.values()):
@@ -712,19 +745,43 @@ class RoomManager:
     def _objects_key(self, room_id: str) -> str:
         return self._key(room_id, "objects")
 
+    def _workspaces_key(self, room_id: str) -> str:
+        return self._key(room_id, "workspaces")
+
     def _seq_key(self, room_id: str) -> str:
         return self._key(room_id, "seq")
 
     def _presence_key(self, room_id: str) -> str:
         return self._key(room_id, "presence")
 
-    async def _restore_redis_state(self, room: Room) -> None:
-        raw = await self._redis.hgetall(self._objects_key(room.id))
+    async def _restore_redis_state(self, room: Room) -> bool:
+        """Restore room state from Redis when it is authoritative.
+
+        Returns ``False`` when Redis holds no state for the room (all of
+        ``workspaces``, ``objects`` and ``seq`` are absent); the caller then keeps the
+        SQLite snapshot and seeds Redis from it. Otherwise Redis wins: metadata, objects
+        and ``seq`` are loaded, normalized, orphaned objects repaired, and the repaired
+        state written back.
+        """
+        raw_workspaces = await self._redis.hgetall(self._workspaces_key(room.id))
+        raw_objects = await self._redis.hgetall(self._objects_key(room.id))
         seq = await self._redis.get(self._seq_key(room.id))
-        if not raw and seq is None:
-            return
+        if not raw_workspaces and not raw_objects and seq is None:
+            return False
+
+        workspaces: list[dict[str, Any]] = []
+        for value in raw_workspaces.values():
+            try:
+                workspace = json.loads(value)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(workspace, dict):
+                workspaces.append(workspace)
+        normalized = normalize_workspaces(workspaces)
+        room.workspaces = {workspace["id"]: workspace for workspace in normalized}
+
         objects: list[dict[str, Any]] = []
-        for value in raw.values():
+        for value in raw_objects.values():
             try:
                 obj = json.loads(value)
             except (TypeError, ValueError):
@@ -734,7 +791,39 @@ class RoomManager:
         room.objects = objects
         room.index = {str(obj["id"]): obj for obj in objects}
         room.seq = int(seq or 0)
+
+        assign_orphan_objects(room.workspace_list(), room.objects)
+        await self._seed_redis_state(room)
         logger.info("Loaded room %s from Redis with %s objects", room.id, len(objects))
+        return True
+
+    async def _seed_redis_state(self, room: Room) -> None:
+        """Write the room's workspaces, objects and seq to Redis in one startup path."""
+        await self._write_workspaces(room)
+        await self._write_objects(room)
+        await self._redis.set(self._seq_key(room.id), room.seq)
+
+    async def _write_workspaces(self, room: Room) -> None:
+        mapping = {
+            workspace["id"]: json.dumps(workspace, ensure_ascii=False)
+            for workspace in room.workspace_list()
+        }
+        if mapping:
+            await self._redis.hset(self._workspaces_key(room.id), mapping=mapping)
+
+    async def _write_objects(self, room: Room) -> None:
+        mapping = {str(obj["id"]): json.dumps(obj, ensure_ascii=False) for obj in room.objects}
+        if mapping:
+            await self._redis.hset(self._objects_key(room.id), mapping=mapping)
+
+    async def _delete_workspace_objects(self, room_id: str, workspace_id: str) -> None:
+        objects_key = self._objects_key(room_id)
+        raw = await self._redis.hgetall(objects_key)
+        fields = [
+            field for field, value in raw.items() if _redis_object_workspace(value) == workspace_id
+        ]
+        if fields:
+            await self._redis.hdel(objects_key, *fields)
 
     async def _start_room_tasks(self, room: Room) -> None:
         pubsub = self._redis.pubsub()
@@ -763,12 +852,30 @@ class RoomManager:
                 if event.get("type") == "remote_kick":
                     await self._kick_local(room, str(event.get("target", "")))
                     continue
-                self._apply_remote_event(room, event)
+                if event.get("type") == "remote_workspace_pull":
+                    await self._handle_remote_pull(room, event)
+                    continue
+                await self._apply_remote_event(room, event)
                 await self._send_local(room, event, exclude=envelope.get("exclude"))
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - a broken subscriber must not kill the app
             logger.exception("Redis subscriber failed for room %s", room_id)
+
+    async def _handle_remote_pull(self, room: Room, event: dict[str, Any]) -> None:
+        """Prepare a move for local students targeted by another instance's pull."""
+        workspace_id = event.get("workspaceId")
+        if not isinstance(workspace_id, str) or room.get_workspace(workspace_id) is None:
+            return
+        by = event.get("by")
+        pull_all = event.get("all") is True
+        client_ids = event.get("clientIds")
+        requested = set(client_ids) if isinstance(client_ids, list) else set()
+        for user in list(room.users.values()):
+            if user.role != "student":
+                continue
+            if pull_all or user.id in requested:
+                await self.prepare_move(room, user, workspace_id, by=by)
 
     async def _heartbeat_loop(self, room: Room) -> None:
         try:
@@ -821,7 +928,9 @@ class RoomManager:
         envelope = {"origin": self.instance_id, **payload}
         await self._redis.publish(self._channel(room_id), json.dumps(envelope, ensure_ascii=False))
 
-    async def _sync_redis_event(self, room: Room, message: dict[str, Any]) -> None:
+    async def _sync_redis_event(
+        self, room: Room, message: dict[str, Any], *, workspace_id: str | None = None
+    ) -> None:
         kind = message.get("type")
         objects_key = self._objects_key(room.id)
         if kind in ADD_EVENTS:
@@ -846,10 +955,21 @@ class RoomManager:
         elif kind == "object_delete":
             await self._redis.hdel(objects_key, str(message.get("objectId", "")))
         elif kind == "clear":
-            await self._redis.delete(objects_key)
+            target = workspace_id or message.get("workspaceId")
+            if isinstance(target, str):
+                await self._delete_workspace_objects(room.id, target)
+            else:
+                await self._redis.delete(objects_key)
             await self._redis.set(self._seq_key(room.id), room.seq)
+        elif kind in ("workspace_created", "workspace_renamed", "workspace_reordered"):
+            await self._write_workspaces(room)
+        elif kind == "workspace_deleted":
+            deleted = message.get("workspaceId")
+            if isinstance(deleted, str):
+                await self._redis.hdel(self._workspaces_key(room.id), deleted)
+                await self._delete_workspace_objects(room.id, deleted)
 
-    def _apply_remote_event(self, room: Room, message: dict[str, Any]) -> None:
+    async def _apply_remote_event(self, room: Room, message: dict[str, Any]) -> None:
         """Update local room state from an event produced by another instance."""
 
         kind = message.get("type")
@@ -885,8 +1005,45 @@ class RoomManager:
         elif kind == "object_delete":
             changed = room.remove_object(str(message.get("objectId", ""))) is not None
         elif kind == "clear":
-            room.clear()
+            workspace_id = message.get("workspaceId")
+            if isinstance(workspace_id, str):
+                room.clear_workspace(workspace_id)
+            else:
+                room.clear()
             changed = True
+        elif kind == "workspace_created":
+            workspace = message.get("workspace")
+            if isinstance(workspace, dict) and isinstance(workspace.get("id"), str):
+                merged = list(room.workspaces.values()) + [workspace]
+                room.workspaces = {ws["id"]: ws for ws in normalize_workspaces(merged)}
+                changed = True
+        elif kind == "workspace_renamed":
+            workspace_id = message.get("workspaceId")
+            name = message.get("name")
+            existing = room.workspaces.get(workspace_id) if isinstance(workspace_id, str) else None
+            if existing is not None and isinstance(name, str):
+                existing["name"] = name
+                changed = True
+        elif kind == "workspace_reordered":
+            ids = message.get("workspaceIds")
+            if isinstance(ids, list):
+                changed = room.reorder_workspaces(
+                    [workspace_id for workspace_id in ids if isinstance(workspace_id, str)]
+                )
+        elif kind == "workspace_deleted":
+            deleted_id = message.get("workspaceId")
+            if isinstance(deleted_id, str) and deleted_id in room.workspaces:
+                room.workspaces.pop(deleted_id, None)
+                room.clear_workspace(deleted_id)
+                fallback = message.get("fallbackId")
+                remaining = room.workspace_ids()
+                if not isinstance(fallback, str) or fallback not in room.workspaces:
+                    fallback = remaining[0] if remaining else None
+                for position, remaining_id in enumerate(remaining):
+                    room.workspaces[remaining_id]["position"] = position
+                if fallback:
+                    await self.move_users_from_deleted(room, deleted_id, fallback)
+                changed = True
         if changed:
             self.mark_dirty(room)
 
