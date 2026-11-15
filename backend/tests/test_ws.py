@@ -40,6 +40,9 @@ def test_init_and_user_joined(client: TestClient, login_user, ws_url) -> None:
         assert init["objects"] == []
         assert init["permissions"]["canClear"] is True
         assert init["board"] == {"width": 1600, "height": 900}
+        assert init["workspaces"] == [{"id": "ws_default", "name": "Страница 1", "position": 0}]
+        assert init["workspaceId"] == "ws_default"
+        assert init["permissions"]["canManageWorkspaces"] is True
 
         with client.websocket_connect(ws_url(student["token"])) as student_ws:
             student_init = student_ws.receive_json()
@@ -49,6 +52,7 @@ def test_init_and_user_joined(client: TestClient, login_user, ws_url) -> None:
                 student["user"]["id"],
             }
             assert student_init["permissions"]["canClear"] is False
+            assert student_init["permissions"]["canManageWorkspaces"] is False
 
             joined = teacher_ws.receive_json()
             assert joined == {"type": "user_joined", "user": student["user"]}
@@ -117,6 +121,7 @@ def test_stroke_lifecycle(client: TestClient, login_user, ws_url) -> None:
                 "id": teacher["user"]["id"],
                 "objectId": "stroke-1",
                 "point": [15, 16],
+                "workspaceId": "ws_default",
             }
 
             teacher_ws.send_json({"type": "stroke_end", "objectId": "stroke-1"})

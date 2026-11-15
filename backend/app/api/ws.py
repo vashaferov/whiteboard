@@ -27,6 +27,13 @@ from app.models.schemas import (
     StrokeStart,
     TextAdd,
     TextUpdate,
+    WorkspaceCreate,
+    WorkspaceDelete,
+    WorkspaceMoveAck,
+    WorkspacePull,
+    WorkspaceRename,
+    WorkspaceReorder,
+    WorkspaceSwitch,
     client_message_adapter,
     permissions_for,
 )
@@ -60,11 +67,40 @@ def _limiter(settings: Settings) -> RateLimiter:
 def _new_object(
     user: ConnectedUser, object_id: str, object_type: str, **fields: Any
 ) -> dict[str, Any]:
-    return {"id": object_id, "type": object_type, "author": user.id, **fields}
+    return {
+        "id": object_id,
+        "type": object_type,
+        "author": user.id,
+        "workspaceId": user.workspace_id,
+        **fields,
+    }
 
 
 def _can_edit_object(user: ConnectedUser, obj: dict[str, Any]) -> bool:
     return user.role == "teacher" or obj.get("author") == user.id
+
+
+async def _check_workspace(manager: RoomManager, user: ConnectedUser, message: Any) -> bool:
+    """Reject messages whose explicit ``workspaceId`` no longer matches the user's page."""
+    if message.workspaceId is not None and message.workspaceId != user.workspace_id:
+        await manager.send_to(user, _error("stale_workspace", "Страница устарела"))
+        return False
+    return True
+
+
+async def _check_object_workspace(
+    manager: RoomManager, room: Room, user: ConnectedUser, message: Any
+) -> dict[str, Any] | None:
+    """Return the target object if it belongs to the user's page, else reject and None."""
+    if not await _check_workspace(manager, user, message):
+        return None
+    obj = room.get_object(message.objectId)
+    if obj is None:
+        return None
+    if obj.get("workspaceId") != user.workspace_id:
+        await manager.send_to(user, _error("stale_workspace", "Страница устарела"))
+        return None
+    return obj
 
 
 @router.websocket("/ws/{room_id}")
@@ -72,6 +108,7 @@ async def websocket_endpoint(
     websocket: WebSocket,
     room_id: str,
     token: str = Query(default=""),
+    workspace: str = Query(default=""),
 ) -> None:
     settings: Settings = websocket.app.state.settings
     manager: RoomManager = websocket.app.state.manager
@@ -102,6 +139,10 @@ async def websocket_endpoint(
         limiter=_limiter(settings),
     )
     room = await manager.join(room_id, user)
+    if workspace and room.get_workspace(workspace) is not None:
+        user.workspace_id = workspace
+    else:
+        user.workspace_id = room.workspace_ids()[0]
     users = await manager.list_users(room)
 
     try:
@@ -112,10 +153,12 @@ async def websocket_endpoint(
                 "roomId": room.id,
                 "role": user.role,
                 "users": users,
-                "objects": list(room.objects),
+                "objects": manager.objects_for(room, user.workspace_id),
                 "userCount": len(users),
                 "board": {"width": settings.board_width, "height": settings.board_height},
                 "permissions": permissions_for(user.role).model_dump(),
+                "workspaces": room.workspace_list(),
+                "workspaceId": user.workspace_id,
             }
         )
         await manager.broadcast(
@@ -187,22 +230,25 @@ async def _handle_message(
     elif isinstance(message, ObjectDelete):
         await _handle_object_delete(manager, room, user, message)
     elif isinstance(message, Cursor):
-        await manager.broadcast(
-            room,
-            {
-                "type": "cursor",
-                "id": user.id,
-                "name": user.name,
-                "color": user.color,
-                "x": message.x,
-                "y": message.y,
-            },
-            exclude=user.id,
-        )
+        await _handle_cursor(manager, room, user, message)
     elif isinstance(message, Clear):
-        await _handle_clear(manager, room, user)
+        await _handle_clear(manager, room, user, message)
     elif isinstance(message, Kick):
         await _handle_kick(manager, room, user, message)
+    elif isinstance(message, WorkspaceSwitch):
+        await _handle_workspace_switch(manager, room, user, message)
+    elif isinstance(message, WorkspaceCreate):
+        await _handle_workspace_create(manager, room, user, message, settings)
+    elif isinstance(message, WorkspaceRename):
+        await _handle_workspace_rename(manager, room, user, message)
+    elif isinstance(message, WorkspaceDelete):
+        await _handle_workspace_delete(manager, room, user, message)
+    elif isinstance(message, WorkspaceReorder):
+        await _handle_workspace_reorder(manager, room, user, message)
+    elif isinstance(message, WorkspacePull):
+        await _handle_workspace_pull(manager, room, user, message)
+    elif isinstance(message, WorkspaceMoveAck):
+        await _handle_workspace_move_ack(manager, room, user, message)
 
 
 async def _handle_stroke_start(
@@ -211,6 +257,8 @@ async def _handle_stroke_start(
     user: ConnectedUser,
     message: StrokeStart,
 ) -> None:
+    if not await _check_workspace(manager, user, message):
+        return
     if len(user.strokes) >= MAX_ACTIVE_STROKES:
         await manager.send_to(
             user, _error("too_many_strokes", "Слишком много штрихов одновременно")
@@ -232,8 +280,9 @@ async def _handle_stroke_start(
     user.strokes[message.objectId] = obj
     await manager.broadcast(
         room,
-        {"type": "stroke_start", "id": user.id, "object": obj},
+        {"type": "stroke_start", "id": user.id, "object": obj, "workspaceId": user.workspace_id},
         exclude=user.id,
+        workspace_id=user.workspace_id,
     )
 
 
@@ -245,6 +294,8 @@ async def _handle_stroke_point(
 ) -> None:
     obj = user.strokes.get(message.objectId)
     if obj is None:
+        return
+    if not await _check_workspace(manager, user, message):
         return
     points: list[list[float]] = obj["points"]
     if len(points) >= MAX_POINTS_PER_STROKE:
@@ -258,8 +309,10 @@ async def _handle_stroke_point(
             "id": user.id,
             "objectId": message.objectId,
             "point": point,
+            "workspaceId": user.workspace_id,
         },
         exclude=user.id,
+        workspace_id=user.workspace_id,
     )
 
 
@@ -269,17 +322,20 @@ async def _handle_stroke_end(
     user: ConnectedUser,
     message: StrokeEnd,
 ) -> None:
+    if not await _check_workspace(manager, user, message):
+        return
     obj = user.strokes.pop(message.objectId, None)
     if obj is None:
         return
     if not manager.has_capacity(room):
         await manager.send_to(user, _error("room_full", "Достигнут лимит объектов на доске"))
         return
-    manager.add_object(room, obj)
+    manager.add_object(room, obj, user.workspace_id)
     await manager.broadcast(
         room,
-        {"type": "stroke_end", "id": user.id, "object": obj},
+        {"type": "stroke_end", "id": user.id, "object": obj, "workspaceId": user.workspace_id},
         exclude=user.id,
+        workspace_id=user.workspace_id,
     )
 
 
@@ -289,6 +345,8 @@ async def _handle_shape_add(
     user: ConnectedUser,
     message: ShapeAdd,
 ) -> None:
+    if not await _check_workspace(manager, user, message):
+        return
     if room.get_object(message.objectId) is not None:
         return
     if not manager.has_capacity(room):
@@ -307,11 +365,12 @@ async def _handle_shape_add(
         strokeWidth=message.strokeWidth,
         fill=message.fill,
     )
-    manager.add_object(room, obj)
+    manager.add_object(room, obj, user.workspace_id)
     await manager.broadcast(
         room,
-        {"type": "shape_add", "id": user.id, "object": obj},
+        {"type": "shape_add", "id": user.id, "object": obj, "workspaceId": user.workspace_id},
         exclude=user.id,
+        workspace_id=user.workspace_id,
     )
 
 
@@ -321,6 +380,8 @@ async def _handle_text_add(
     user: ConnectedUser,
     message: TextAdd,
 ) -> None:
+    if not await _check_workspace(manager, user, message):
+        return
     if room.get_object(message.objectId) is not None:
         return
     if not manager.has_capacity(room):
@@ -336,11 +397,12 @@ async def _handle_text_add(
         color=message.color,
         fontSize=message.fontSize,
     )
-    manager.add_object(room, obj)
+    manager.add_object(room, obj, user.workspace_id)
     await manager.broadcast(
         room,
-        {"type": "text_add", "id": user.id, "object": obj},
+        {"type": "text_add", "id": user.id, "object": obj, "workspaceId": user.workspace_id},
         exclude=user.id,
+        workspace_id=user.workspace_id,
     )
 
 
@@ -350,6 +412,8 @@ async def _handle_image_add(
     user: ConnectedUser,
     message: ImageAdd,
 ) -> None:
+    if not await _check_workspace(manager, user, message):
+        return
     if room.get_object(message.objectId) is not None:
         return
     if not await manager.images.exists(message.url):
@@ -368,11 +432,12 @@ async def _handle_image_add(
         width=message.width,
         height=message.height,
     )
-    manager.add_object(room, obj)
+    manager.add_object(room, obj, user.workspace_id)
     await manager.broadcast(
         room,
-        {"type": "image_add", "id": user.id, "object": obj},
+        {"type": "image_add", "id": user.id, "object": obj, "workspaceId": user.workspace_id},
         exclude=user.id,
+        workspace_id=user.workspace_id,
     )
 
 
@@ -382,7 +447,7 @@ async def _handle_object_update(
     user: ConnectedUser,
     message: ObjectUpdate,
 ) -> None:
-    obj = room.get_object(message.objectId)
+    obj = await _check_object_workspace(manager, room, user, message)
     if obj is None:
         return
     if not _can_edit_object(user, obj):
@@ -397,8 +462,10 @@ async def _handle_object_update(
             "objectId": message.objectId,
             "x": message.x,
             "y": message.y,
+            "workspaceId": user.workspace_id,
         },
         exclude=user.id,
+        workspace_id=user.workspace_id,
     )
 
 
@@ -408,7 +475,7 @@ async def _handle_object_transform(
     user: ConnectedUser,
     message: ObjectTransform,
 ) -> None:
-    obj = room.get_object(message.objectId)
+    obj = await _check_object_workspace(manager, room, user, message)
     if obj is None:
         return
     if not _can_edit_object(user, obj):
@@ -439,8 +506,14 @@ async def _handle_object_transform(
         return
     await manager.broadcast(
         room,
-        {"type": "object_transform", "id": user.id, "object": updated},
+        {
+            "type": "object_transform",
+            "id": user.id,
+            "object": updated,
+            "workspaceId": user.workspace_id,
+        },
         exclude=user.id,
+        workspace_id=user.workspace_id,
     )
 
 
@@ -450,7 +523,7 @@ async def _handle_text_update(
     user: ConnectedUser,
     message: TextUpdate,
 ) -> None:
-    obj = room.get_object(message.objectId)
+    obj = await _check_object_workspace(manager, room, user, message)
     if obj is None:
         return
     if obj.get("type") != "text":
@@ -468,8 +541,14 @@ async def _handle_text_update(
         return
     await manager.broadcast(
         room,
-        {"type": "text_update", "id": user.id, "object": updated},
+        {
+            "type": "text_update",
+            "id": user.id,
+            "object": updated,
+            "workspaceId": user.workspace_id,
+        },
         exclude=user.id,
+        workspace_id=user.workspace_id,
     )
 
 
@@ -482,21 +561,66 @@ async def _handle_object_delete(
     if user.role != "teacher":
         await manager.send_to(user, _error("forbidden", "Удалять объекты может только учитель"))
         return
+    obj = await _check_object_workspace(manager, room, user, message)
+    if obj is None:
+        return
     if manager.delete_object(room, message.objectId) is None:
         return
     await manager.broadcast(
         room,
-        {"type": "object_delete", "id": user.id, "objectId": message.objectId},
+        {
+            "type": "object_delete",
+            "id": user.id,
+            "objectId": message.objectId,
+            "workspaceId": user.workspace_id,
+        },
         exclude=user.id,
+        workspace_id=user.workspace_id,
     )
 
 
-async def _handle_clear(manager: RoomManager, room: Room, user: ConnectedUser) -> None:
+async def _handle_cursor(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: Cursor,
+) -> None:
+    if not await _check_workspace(manager, user, message):
+        return
+    await manager.broadcast(
+        room,
+        {
+            "type": "cursor",
+            "id": user.id,
+            "name": user.name,
+            "color": user.color,
+            "x": message.x,
+            "y": message.y,
+            "workspaceId": user.workspace_id,
+        },
+        exclude=user.id,
+        workspace_id=user.workspace_id,
+    )
+
+
+async def _handle_clear(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: Clear,
+) -> None:
     if user.role != "teacher":
         await manager.send_to(user, _error("forbidden", "Очистить доску может только учитель"))
         return
-    manager.clear_room(room)
-    await manager.broadcast(room, {"type": "clear", "id": user.id}, exclude=user.id)
+    if not await _check_workspace(manager, user, message):
+        return
+    manager.clear_room(room, user.workspace_id)
+    await manager.broadcast(
+        room,
+        {"type": "clear", "id": user.id, "workspaceId": user.workspace_id},
+        exclude=user.id,
+        workspace_id=user.workspace_id,
+    )
 
 
 async def _handle_kick(
@@ -514,3 +638,120 @@ async def _handle_kick(
         return
     if not await manager.kick(room.id, message.clientId):
         await manager.send_to(user, _error("user_not_found", "Участник не найден"))
+
+
+async def _handle_workspace_switch(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: WorkspaceSwitch,
+) -> None:
+    if not await manager.switch_workspace(room, user, message.workspaceId):
+        await manager.send_to(user, _error("workspace_not_found", "Страница не найдена"))
+
+
+async def _handle_workspace_create(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: WorkspaceCreate,
+    settings: Settings,
+) -> None:
+    if user.role != "teacher":
+        await manager.send_to(user, _error("forbidden", "Создавать страницы может только учитель"))
+        return
+    if len(room.workspaces) >= settings.max_workspaces_per_room:
+        await manager.send_to(user, _error("workspace_limit", "Достигнут лимит страниц"))
+        return
+    workspace = manager.create_workspace(room, message.name)
+    await manager.broadcast(room, {"type": "workspace_created", "workspace": workspace})
+    await manager.switch_workspace(room, user, workspace["id"], reason="create")
+
+
+async def _handle_workspace_rename(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: WorkspaceRename,
+) -> None:
+    if user.role != "teacher":
+        await manager.send_to(
+            user, _error("forbidden", "Переименовывать страницы может только учитель")
+        )
+        return
+    name = message.name.strip()
+    if not name:
+        await manager.send_to(user, _error("invalid_message", "Название не может быть пустым"))
+        return
+    if manager.rename_workspace(room, message.workspaceId, name) is None:
+        await manager.send_to(user, _error("workspace_not_found", "Страница не найдена"))
+        return
+    await manager.broadcast(
+        room,
+        {"type": "workspace_renamed", "workspaceId": message.workspaceId, "name": name},
+    )
+
+
+async def _handle_workspace_delete(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: WorkspaceDelete,
+) -> None:
+    if user.role != "teacher":
+        await manager.send_to(user, _error("forbidden", "Удалять страницы может только учитель"))
+        return
+    deleted, fallback = manager.delete_workspace(room, message.workspaceId)
+    if deleted is None:
+        await manager.send_to(user, _error("last_workspace", "Нельзя удалить последнюю страницу"))
+        return
+    await manager.broadcast(
+        room,
+        {"type": "workspace_deleted", "workspaceId": deleted["id"], "fallbackId": fallback},
+    )
+    await manager.move_users_from_deleted(room, deleted["id"], fallback)
+
+
+async def _handle_workspace_reorder(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: WorkspaceReorder,
+) -> None:
+    if user.role != "teacher":
+        await manager.send_to(
+            user, _error("forbidden", "Менять порядок страниц может только учитель")
+        )
+        return
+    if not manager.reorder_workspaces(room, message.workspaceIds):
+        await manager.send_to(user, _error("invalid_message", "Некорректный порядок страниц"))
+        return
+    await manager.broadcast(
+        room,
+        {"type": "workspace_reordered", "workspaceIds": message.workspaceIds},
+    )
+
+
+async def _handle_workspace_pull(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: WorkspacePull,
+) -> None:
+    if user.role != "teacher":
+        await manager.send_to(
+            user, _error("forbidden", "Перемещать участников может только учитель")
+        )
+        return
+    moved = await manager.pull_users(room, user, client_ids=message.clientIds, all=message.all)
+    if moved == 0:
+        await manager.send_to(user, _error("user_not_found", "Участник не найден"))
+
+
+async def _handle_workspace_move_ack(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: WorkspaceMoveAck,
+) -> None:
+    await manager.handle_move_ack(room, user, message.requestId)
