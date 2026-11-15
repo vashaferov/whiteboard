@@ -65,6 +65,16 @@ class RateLimiter:
 
 
 @dataclass(slots=True)
+class PendingMove:
+    """A prepared workspace move waiting for the student's ack (or a timeout)."""
+
+    request_id: str
+    workspace_id: str
+    by: str | None
+    task: asyncio.Task | None
+
+
+@dataclass(slots=True)
 class ConnectedUser:
     id: str
     name: str
@@ -76,6 +86,7 @@ class ConnectedUser:
     workspace_id: str = DEFAULT_WORKSPACE_ID
     state_version: int = 0
     workspace_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    pending_move: PendingMove | None = None
 
     def public(self) -> dict[str, str]:
         return {
@@ -388,6 +399,9 @@ class RoomManager:
             user = room.users.pop(user_id, None)
             if user is None:
                 continue
+            if user.pending_move is not None:
+                await self._cancel_task(user.pending_move.task)
+                user.pending_move = None
             await self._remove_presence(room.id, user_id)
             await self._finalize_strokes(room, user)
             removed.append(user_id)
@@ -546,6 +560,67 @@ class RoomManager:
                 },
             )
         return True
+
+    async def prepare_move(
+        self, room: Room, user: ConnectedUser, workspace_id: str, by: str | None
+    ) -> str:
+        """Send ``workspace_prepare_move`` and start the ack timeout. Returns the request id."""
+        previous = user.pending_move
+        if previous is not None:
+            await self._cancel_task(previous.task)
+        request_id = f"mv_{uuid.uuid4().hex}"
+        workspace = room.get_workspace(workspace_id)
+        name = workspace["name"] if workspace is not None else ""
+        task = asyncio.create_task(self._move_timeout(room, user, request_id))
+        user.pending_move = PendingMove(request_id, workspace_id, by, task)
+        await self.send_to(
+            user,
+            {
+                "type": "workspace_prepare_move",
+                "requestId": request_id,
+                "workspaceId": workspace_id,
+                "name": name,
+                "by": by,
+            },
+        )
+        return request_id
+
+    async def _move_timeout(self, room: Room, user: ConnectedUser, request_id: str) -> None:
+        await asyncio.sleep(self.settings.workspace_move_timeout_seconds)
+        pending = user.pending_move
+        if pending is not None and pending.request_id == request_id:
+            await self._complete_move(room, user)
+
+    async def handle_move_ack(self, room: Room, user: ConnectedUser, request_id: str) -> bool:
+        """Complete a pending move on the student's ack. Returns False for stale/wrong acks."""
+        pending = user.pending_move
+        if pending is None or pending.request_id != request_id:
+            return False
+        await self._cancel_task(pending.task)
+        await self._complete_move(room, user)
+        return True
+
+    async def _complete_move(self, room: Room, user: ConnectedUser) -> None:
+        pending = user.pending_move
+        if pending is None:
+            return
+        user.pending_move = None
+        await self.switch_workspace(room, user, pending.workspace_id, reason="pull", by=pending.by)
+
+    async def pull_users(
+        self, room: Room, teacher: ConnectedUser, *, client_ids: list[str], all: bool
+    ) -> int:
+        """Prepare a move for the selected local students. Returns the number of targets."""
+        targets: list[ConnectedUser] = []
+        for user in room.users.values():
+            if user.role != "student" or user.id == teacher.id:
+                continue
+            if all or user.id in client_ids:
+                targets.append(user)
+        workspace_id = teacher.workspace_id
+        for user in targets:
+            await self.prepare_move(room, user, workspace_id, by=teacher.name)
+        return len(targets)
 
     async def move_users_from_deleted(self, room: Room, deleted_id: str, fallback_id: str) -> None:
         for user in list(room.users.values()):

@@ -370,3 +370,117 @@ async def test_workspace_list_persists_across_managers(tmp_path: Path) -> None:
     assert [ws["position"] for ws in restored.workspace_list()] == [0, 1]
     await manager2.shutdown()
     await store.close()
+
+
+async def test_pull_prepares_then_moves_on_ack(tmp_path: Path) -> None:
+    _, store, manager = build_manager(tmp_path)
+    room = await manager.get_or_create("r1")
+    second = manager.create_workspace(room, "Вторая")
+    teacher, _ = make_user("t", role="teacher")
+    student, socket = make_user("s", role="student")
+    await manager.join("r1", teacher)
+    await manager.join("r1", student)
+    teacher.workspace_id = second["id"]
+    socket.messages.clear()
+
+    assert await manager.pull_users(room, teacher, client_ids=["s"], all=False) == 1
+    prepare = socket.messages[-1]
+    assert prepare["type"] == "workspace_prepare_move"
+    assert prepare["workspaceId"] == second["id"]
+    assert student.workspace_id == "ws_default"
+    assert await manager.handle_move_ack(room, student, prepare["requestId"]) is True
+    assert student.workspace_id == second["id"]
+    assert [m["type"] for m in socket.messages[-2:]] == ["workspace_moved", "workspace_state"]
+    await manager.shutdown()
+    await store.close()
+
+
+async def test_pull_all_moves_only_students(tmp_path: Path) -> None:
+    _, store, manager = build_manager(tmp_path)
+    room = await manager.get_or_create("r1")
+    second = manager.create_workspace(room, "Вторая")
+    teacher, teacher_socket = make_user("t", role="teacher")
+    first, first_socket = make_user("s1", role="student")
+    second_user, second_socket = make_user("s2", role="student")
+    for user in (teacher, first, second_user):
+        await manager.join("r1", user)
+    teacher.workspace_id = second["id"]
+    first_socket.messages.clear()
+    second_socket.messages.clear()
+    teacher_socket.messages.clear()
+
+    assert await manager.pull_users(room, teacher, client_ids=[], all=True) == 2
+    assert teacher.workspace_id == second["id"]
+    assert first.workspace_id == "ws_default"
+    assert second_user.workspace_id == "ws_default"
+    for socket in (first_socket, second_socket):
+        request = next(m for m in socket.messages if m["type"] == "workspace_prepare_move")
+        await manager.handle_move_ack(
+            room, first if socket is first_socket else second_user, request["requestId"]
+        )
+    assert first.workspace_id == second["id"]
+    assert second_user.workspace_id == second["id"]
+    assert teacher_socket.messages == []
+    await manager.shutdown()
+    await store.close()
+
+
+async def test_pull_timeout_moves_without_ack(tmp_path: Path) -> None:
+    settings, store, manager = build_manager(tmp_path)
+    settings = settings.model_copy(update={"workspace_move_timeout_seconds": 0.05})
+    manager.settings = settings
+    room = await manager.get_or_create("r1")
+    second = manager.create_workspace(room, "Вторая")
+    teacher, _ = make_user("t", role="teacher")
+    student, socket = make_user("s", role="student")
+    await manager.join("r1", teacher)
+    await manager.join("r1", student)
+    teacher.workspace_id = second["id"]
+    socket.messages.clear()
+    await manager.pull_users(room, teacher, client_ids=["s"], all=False)
+    prepare = socket.messages[-1]
+    await asyncio.sleep(0.12)
+    assert student.workspace_id == second["id"]
+    assert socket.messages[-1]["type"] == "workspace_state"
+    assert await manager.handle_move_ack(room, student, prepare["requestId"]) is False
+    await manager.shutdown()
+    await store.close()
+
+
+async def test_stale_ack_is_ignored(tmp_path: Path) -> None:
+    _, store, manager = build_manager(tmp_path)
+    room = await manager.get_or_create("r1")
+    second = manager.create_workspace(room, "Вторая")
+    teacher, _ = make_user("t", role="teacher")
+    student, socket = make_user("s", role="student")
+    await manager.join("r1", teacher)
+    await manager.join("r1", student)
+    teacher.workspace_id = second["id"]
+    socket.messages.clear()
+    await manager.pull_users(room, teacher, client_ids=["s"], all=False)
+    prepare = socket.messages[-1]
+    assert await manager.handle_move_ack(room, student, "mv_wrong") is False
+    assert student.workspace_id == "ws_default"
+    assert await manager.handle_move_ack(room, student, prepare["requestId"]) is True
+    await manager.shutdown()
+    await store.close()
+
+
+async def test_manual_switch_does_not_cancel_pending_pull(tmp_path: Path) -> None:
+    _, store, manager = build_manager(tmp_path)
+    room = await manager.get_or_create("r1")
+    second = manager.create_workspace(room, "Вторая")
+    teacher, _ = make_user("t", role="teacher")
+    student, socket = make_user("s", role="student")
+    await manager.join("r1", teacher)
+    await manager.join("r1", student)
+    teacher.workspace_id = second["id"]
+    socket.messages.clear()
+    await manager.pull_users(room, teacher, client_ids=["s"], all=False)
+    prepare = socket.messages[-1]
+    assert await manager.switch_workspace(room, student, "ws_default") is True
+    assert await manager.handle_move_ack(room, student, prepare["requestId"]) is True
+    assert student.workspace_id == second["id"]
+    assert socket.messages[-1]["stateVersion"] == 2
+    await manager.shutdown()
+    await store.close()
