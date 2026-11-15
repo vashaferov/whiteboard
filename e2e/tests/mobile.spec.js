@@ -1,10 +1,13 @@
 import { expect, test } from '@playwright/test';
 
 import {
+  activePageName,
   boardBox,
+  createPage,
   drawRect,
   login,
   objectCount,
+  selectPage,
   selectedShape,
   uniqueRoom,
   worldToScreen,
@@ -15,6 +18,10 @@ test('mobile: toolbar is usable and drawing works on a phone viewport', async ({
 }) => {
   const room = uniqueRoom('mobile');
   await login(page, { name: 'Учитель', role: 'teacher', room });
+
+  // Pages panel is visible as a horizontal strip and the first page is active.
+  await expect(page.locator('#pages-panel')).toBeVisible();
+  expect(await activePageName(page)).toBe('Страница 1');
 
   const box = await boardBox(page);
   expect(box.width).toBeGreaterThan(200);
@@ -47,4 +54,10 @@ test('mobile: toolbar is usable and drawing works on a phone viewport', async ({
   const rectCenter = await worldToScreen(page, { x: 470, y: 320 });
   await page.touchscreen.tap(rectCenter.x, rectCenter.y);
   expect((await selectedShape(page)).width).toBeGreaterThan(0);
+
+  // Creating a page and switching back updates the active page name.
+  await createPage(page, 'Мобильная');
+  await expect.poll(() => activePageName(page)).toBe('Мобильная');
+  await selectPage(page, 'Страница 1');
+  await expect.poll(() => activePageName(page)).toBe('Страница 1');
 });

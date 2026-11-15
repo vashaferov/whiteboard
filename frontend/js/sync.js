@@ -14,9 +14,10 @@ const CLOSE_REASONS = {
 };
 
 export class SyncClient {
-  constructor({ roomId, token, onEvent, onStatus, onFatal }) {
+  constructor({ roomId, token, onEvent, onStatus, onFatal, workspaceId }) {
     this.roomId = roomId;
     this.token = token;
+    this.workspaceId = workspaceId ?? '';
     this.onEvent = onEvent;
     this.onStatus = onStatus;
     this.onFatal = onFatal ?? (() => {});
@@ -32,9 +33,12 @@ export class SyncClient {
     this.onStatus?.('connecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${protocol}://${window.location.host}/ws/${encodeURIComponent(
+    let url = `${protocol}://${window.location.host}/ws/${encodeURIComponent(
       this.roomId,
     )}?token=${encodeURIComponent(this.token)}`;
+    if (this.workspaceId) {
+      url += `&workspace=${encodeURIComponent(this.workspaceId)}`;
+    }
 
     let socket;
     try {

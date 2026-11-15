@@ -635,6 +635,10 @@ export class Board {
     this.overlayLayer.batchDraw();
   }
 
+  setInteractive(enabled) {
+    this.stage.listening(Boolean(enabled));
+  }
+
   destroy() {
     this.destroyed = true;
     this.resizeObserver?.disconnect();

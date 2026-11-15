@@ -395,10 +395,135 @@ textarea {
   position: relative;
   flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   background: radial-gradient(circle at 50% 25%, #eaf0f9, #d9e2ee);
   cursor: crosshair;
   touch-action: none;
+}
+
+/* --------------------------------------------------------------- pages */
+
+.pages-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 0 0 auto;
+  width: 210px;
+  padding: 12px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+
+.pages-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.pages-panel__title {
+  margin: 0;
+  font-size: 14px;
+  color: #334155;
+}
+
+.pages-panel__add {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.page-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.page {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 10px;
+}
+
+.page.is-active {
+  background: var(--accent);
+}
+
+.page__select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.page.is-active .page__select {
+  color: #fff;
+}
+
+.page__name {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page__actions {
+  display: flex;
+  gap: 2px;
+}
+
+.page__up,
+.page__down,
+.page__rename,
+.page__delete {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.page.is-active .page__up,
+.page.is-active .page__down,
+.page.is-active .page__rename,
+.page.is-active .page__delete {
+  color: #fff;
+}
+
+.page__up:hover,
+.page__down:hover,
+.page__rename:hover {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.page.is-active .page__up:hover,
+.page.is-active .page__down:hover,
+.page.is-active .page__rename:hover {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.page__delete:hover {
+  background: #fee2e2;
+  color: var(--danger);
 }
 
 .board canvas {
@@ -578,6 +703,34 @@ kbd {
 @media (max-width: 900px) {
   .users-panel {
     display: none;
+  }
+
+  .workspace {
+    flex-direction: column;
+  }
+
+  .pages-panel {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    width: auto;
+    padding: 8px 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .pages-panel__title {
+    display: none;
+  }
+
+  .page-list {
+    flex-direction: row;
+  }
+
+  .page {
+    flex: 0 0 auto;
   }
 }
 

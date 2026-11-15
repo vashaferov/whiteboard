@@ -107,24 +107,24 @@ export async function selectObject(page, point) {
 
 /**
  * Anchor position of the Transformer for the selected node.
- * Konva's getClientRect() is already in stage/container pixels, so only the
- * board's page offset is added on top.
+ * Targets the actual Konva anchor node so the centre lands on its hit area
+ * regardless of the board's scale (anchors keep a fixed on-screen size).
  */
 export async function transformerAnchor(page, position = 'bottom-right') {
-  const rect = await page.evaluate(() => {
+  const rect = await page.evaluate((pos) => {
     const transformer = window.Konva.stages[0].findOne('Transformer');
-    const node = transformer?.nodes()[0];
-    if (!node) return null;
-    const box = node.getClientRect();
-    return { x: box.x, y: box.y, width: box.width, height: box.height };
-  });
+    const selector = pos === 'rotater' ? '.rotater' : '.bottom-right';
+    const anchor = transformer?.findOne(selector);
+    if (!anchor) return null;
+    const clientRect = anchor.getClientRect();
+    return {
+      x: clientRect.x + clientRect.width / 2,
+      y: clientRect.y + clientRect.height / 2,
+    };
+  }, position);
   if (!rect) throw new Error('nothing is selected in the Transformer');
   const box = await boardBox(page);
-  const offset =
-    position === 'rotater'
-      ? { x: rect.width / 2, y: -32 }
-      : { x: rect.width, y: rect.height };
-  return { x: box.x + rect.x + offset.x, y: box.y + rect.y + offset.y };
+  return { x: box.x + rect.x, y: box.y + rect.y };
 }
 
 export async function dragBy(page, start, dx, dy) {
@@ -177,6 +177,37 @@ export async function reloadAndWait(page) {
   await page.reload();
   await expect(page.locator('#status')).toHaveText('Подключено', { timeout: 15_000 });
   await expect(page.locator('#app')).toBeVisible();
+}
+
+export async function pageNames(page) {
+  return page.locator('#pages-panel .page__name').allTextContents();
+}
+
+export async function activePageName(page) {
+  return page.locator('#pages-panel .page.is-active .page__name').textContent();
+}
+
+export async function selectPage(page, name) {
+  await page.locator('#pages-panel .page', { hasText: name }).locator('.page__select').click();
+}
+
+export async function createPage(page, name) {
+  page.once('dialog', async (dialog) => {
+    await dialog.accept(name);
+  });
+  await page.click('#page-add');
+}
+
+export async function renamePage(page, oldName, newName) {
+  page.once('dialog', async (dialog) => {
+    await dialog.accept(newName);
+  });
+  await page.locator('#pages-panel .page', { hasText: oldName }).locator('.page__rename').click();
+}
+
+export async function movePage(page, name, direction) {
+  const selector = direction === 'up' ? '.page__up' : '.page__down';
+  await page.locator('#pages-panel .page', { hasText: name }).locator(selector).click();
 }
 
 export function collectErrors(page, label = 'page') {

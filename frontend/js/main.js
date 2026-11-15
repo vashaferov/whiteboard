@@ -3,6 +3,7 @@
 import { Board } from './board.js';
 import { ToolManager } from './tools.js';
 import { SyncClient } from './sync.js';
+import { PagesPanel } from './pages.js';
 
 const SESSION_KEY = 'wb:session';
 const NAME_KEY = 'wb:name';
@@ -43,11 +44,17 @@ const state = {
   textPoint: null,
   textEditObjectId: null,
   leaving: false,
+  workspaces: [],
+  workspaceId: null,
+  pendingWorkspaceId: null,
+  pendingEvents: [],
+  stateVersion: 0,
 };
 
 const els = {};
 const $ = (selector) => document.querySelector(selector);
 
+let pagesPanel = null;
 let toastTimer = null;
 
 function newId() {
@@ -112,6 +119,7 @@ function cacheElements() {
 
   els.app = $('#app');
   els.board = $('#board');
+  els.pagesPanel = $('#pages-panel');
   els.status = $('#status');
   els.roomLabel = $('#room-label');
   els.userList = $('#user-list');
@@ -202,6 +210,11 @@ function startSession(session) {
   state.permissions = session.permissions || state.permissions;
   state.ready = false;
   state.leaving = false;
+  state.workspaces = [];
+  state.workspaceId = session.workspaceId || null;
+  state.pendingWorkspaceId = null;
+  state.pendingEvents = [];
+  state.stateVersion = 0;
 
   els.login.hidden = true;
   els.app.hidden = false;
@@ -216,7 +229,7 @@ function startSession(session) {
       Boolean(state.user) &&
       (state.user.role === 'teacher' || object.author === state.user.id),
     onObjectMove: (objectId, x, y) => {
-      state.sync?.send({
+      sendWorkspace({
         type: 'object_update',
         objectId,
         x: round(x),
@@ -224,7 +237,7 @@ function startSession(session) {
       });
     },
     onObjectTransform: (objectId, data) => {
-      state.sync?.send({
+      sendWorkspace({
         type: 'object_transform',
         objectId,
         ...data,
@@ -235,15 +248,26 @@ function startSession(session) {
 
   state.tools = new ToolManager({
     board: state.board,
-    onEvent: (message) => state.sync?.send(message),
+    onEvent: (message) => sendWorkspace(message),
     onCreateText: (point) => openTextEditor(point),
   });
+
+  pagesPanel = new PagesPanel({
+    container: els.pagesPanel,
+    onSelect: (id) => requestWorkspaceSwitch(id),
+    onCreate: () => requestWorkspaceCreate(),
+    onRename: (workspace) => requestWorkspaceRename(workspace),
+    onDelete: (workspace) => requestWorkspaceDelete(workspace),
+    onMove: (id, direction) => requestWorkspaceMove(id, direction),
+  });
+  renderPages();
 
   setupCursorBroadcast();
 
   state.sync = new SyncClient({
     roomId: session.roomId,
     token: session.token,
+    workspaceId: session.workspaceId,
     onEvent: handleServerEvent,
     onStatus: handleConnectionStatus,
     onFatal: (reason) => leaveLesson(FATAL_MESSAGES[reason] || FATAL_MESSAGES.closed),
@@ -271,6 +295,13 @@ function leaveLesson(message = '') {
   state.ready = false;
   state.textPoint = null;
   state.textEditObjectId = null;
+  state.workspaces = [];
+  state.workspaceId = null;
+  state.pendingWorkspaceId = null;
+  state.pendingEvents = [];
+  state.stateVersion = 0;
+  pagesPanel = null;
+  els.pagesPanel.replaceChildren();
 
   clearSession();
   els.textEditor.hidden = true;
@@ -298,7 +329,7 @@ function bindToolbar() {
     if (!state.permissions.canClear || !state.board) return;
     if (!window.confirm('Очистить доску для всех участников?')) return;
     state.board.clearObjects();
-    state.sync?.send({ type: 'clear' });
+    sendWorkspace({ type: 'clear' });
   });
 
   els.imageBtn.addEventListener('click', () => els.fileInput.click());
@@ -393,7 +424,7 @@ async function uploadImage(event) {
       width,
       height,
     });
-    state.sync?.send({
+    sendWorkspace({
       type: 'image_add',
       objectId,
       url: data.url,
@@ -494,7 +525,7 @@ function commitText() {
     const current = state.board.getObjectData(editId);
     if (!current || current.content === content) return;
     state.board.applyObjectTransform({ ...current, content });
-    state.sync?.send({ type: 'text_update', objectId: editId, content });
+    sendWorkspace({ type: 'text_update', objectId: editId, content });
     return;
   }
 
@@ -512,7 +543,7 @@ function commitText() {
     rotation: 0,
   };
   state.board.addObject(object);
-  state.sync?.send({
+  sendWorkspace({
     type: 'text_add',
     objectId,
     content,
@@ -528,6 +559,81 @@ function closeTextEditor() {
   els.textEditor.value = '';
   state.textPoint = null;
   state.textEditObjectId = null;
+}
+
+// ----------------------------------------------------------------- workspaces
+
+function sendWorkspace(message) {
+  return state.sync?.send({ ...message, workspaceId: state.workspaceId });
+}
+
+function canManageWorkspaces() {
+  return Boolean(state.permissions.canManageWorkspaces);
+}
+
+function renderPages() {
+  pagesPanel?.render(state.workspaces, state.workspaceId, {
+    canManage: canManageWorkspaces(),
+    busy: Boolean(state.pendingWorkspaceId),
+  });
+}
+
+function persistSessionWorkspace() {
+  const session = loadSession();
+  if (!session) return;
+  session.workspaceId = state.workspaceId;
+  saveSession(session);
+}
+
+function nextPageName() {
+  let highest = 0;
+  for (const workspace of state.workspaces) {
+    const match = /^Страница (\d+)$/.exec(workspace.name || '');
+    if (match) highest = Math.max(highest, Number(match[1]));
+  }
+  const number = highest ? highest + 1 : state.workspaces.length + 1;
+  return `Страница ${number}`;
+}
+
+function requestWorkspaceSwitch(id) {
+  if (!id || state.pendingWorkspaceId || id === state.workspaceId) return;
+  commitText();
+  state.board.setInteractive(false);
+  state.pendingWorkspaceId = id;
+  state.pendingEvents = [];
+  renderPages();
+  state.sync?.send({ type: 'workspace_switch', workspaceId: id });
+}
+
+function requestWorkspaceCreate() {
+  const name = window.prompt('Название новой страницы', nextPageName());
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  state.sync?.send({ type: 'workspace_create', name: trimmed });
+}
+
+function requestWorkspaceRename(workspace) {
+  const name = window.prompt('Название страницы', workspace.name);
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  state.sync?.send({ type: 'workspace_rename', workspaceId: workspace.id, name: trimmed });
+}
+
+function requestWorkspaceDelete(workspace) {
+  if (!window.confirm(`Удалить страницу «${workspace.name}»?`)) return;
+  state.sync?.send({ type: 'workspace_delete', workspaceId: workspace.id });
+}
+
+function requestWorkspaceMove(id, direction) {
+  const ids = state.workspaces.map((workspace) => workspace.id);
+  const index = ids.indexOf(id);
+  if (index === -1) return;
+  const target = direction === 'up' ? index - 1 : index + 1;
+  if (target < 0 || target >= ids.length) return;
+  [ids[index], ids[target]] = [ids[target], ids[index]];
+  state.sync?.send({ type: 'workspace_reorder', workspaceIds: ids });
 }
 
 // ------------------------------------------------------------------- events
@@ -549,6 +655,65 @@ function handleServerEvent(message) {
       board.removeCursor(message.id);
       renderUsers();
       break;
+    case 'stroke_start':
+    case 'stroke_point':
+    case 'stroke_end':
+    case 'shape_add':
+    case 'text_add':
+    case 'image_add':
+    case 'object_update':
+    case 'object_transform':
+    case 'text_update':
+    case 'object_delete':
+    case 'clear':
+    case 'cursor':
+      applyWorkspaceEvent(message);
+      break;
+    case 'cursor_remove':
+      board.removeCursor(message.id);
+      break;
+    case 'workspace_state':
+      handleWorkspaceState(message);
+      break;
+    case 'workspace_created':
+      handleWorkspaceCreated(message);
+      break;
+    case 'workspace_renamed':
+      handleWorkspaceRenamed(message);
+      break;
+    case 'workspace_reordered':
+      handleWorkspaceReordered(message);
+      break;
+    case 'workspace_deleted':
+      handleWorkspaceDeleted(message);
+      break;
+    case 'error':
+      toast(message.message || 'Ошибка');
+      break;
+    case 'kicked':
+      toast(message.reason || 'Учитель отключил вас');
+      break;
+    default:
+      break;
+  }
+}
+
+// Объектные/курсорные события приходят с workspaceId: применяем только для
+// текущей страницы, события для переключаемой — буферизуем, остальные — игнорируем.
+function applyWorkspaceEvent(message) {
+  const workspaceId = message.workspaceId;
+  if (workspaceId && workspaceId !== state.workspaceId) {
+    if (workspaceId === state.pendingWorkspaceId) {
+      state.pendingEvents.push(message);
+    }
+    return;
+  }
+  applyObjectEvent(message);
+}
+
+function applyObjectEvent(message) {
+  const board = state.board;
+  switch (message.type) {
     case 'stroke_start':
       board.addObject(message.object);
       break;
@@ -585,15 +750,63 @@ function handleServerEvent(message) {
         color: message.color,
       });
       break;
-    case 'error':
-      toast(message.message || 'Ошибка');
-      break;
-    case 'kicked':
-      toast(message.reason || 'Учитель отключил вас');
-      break;
     default:
       break;
   }
+}
+
+function handleWorkspaceState(message) {
+  const version = message.stateVersion ?? 0;
+  if (version <= state.stateVersion) return;
+
+  state.stateVersion = version;
+  state.workspaceId = message.workspaceId;
+  state.pendingWorkspaceId = null;
+
+  state.board.setObjects(message.objects || []);
+  state.board.clearCursors();
+  state.board.selectObject(null);
+  state.board.setInteractive(true);
+
+  const buffered = state.pendingEvents;
+  state.pendingEvents = [];
+  for (const event of buffered) applyObjectEvent(event);
+
+  renderPages();
+  persistSessionWorkspace();
+}
+
+function handleWorkspaceCreated(message) {
+  const workspace = message.workspace;
+  if (!workspace || !workspace.id) return;
+  const rest = state.workspaces.filter((item) => item.id !== workspace.id);
+  state.workspaces = [...rest, workspace].sort((a, b) => a.position - b.position);
+  renderPages();
+}
+
+function handleWorkspaceRenamed(message) {
+  const workspace = state.workspaces.find((item) => item.id === message.workspaceId);
+  if (!workspace) return;
+  workspace.name = message.name;
+  renderPages();
+}
+
+function handleWorkspaceReordered(message) {
+  const ids = message.workspaceIds || [];
+  const byId = new Map(state.workspaces.map((workspace) => [workspace.id, workspace]));
+  state.workspaces = ids
+    .map((id, position) => {
+      const workspace = byId.get(id);
+      if (workspace) workspace.position = position;
+      return workspace;
+    })
+    .filter(Boolean);
+  renderPages();
+}
+
+function handleWorkspaceDeleted(message) {
+  state.workspaces = state.workspaces.filter((item) => item.id !== message.workspaceId);
+  renderPages();
 }
 
 function handleInit(message) {
@@ -607,12 +820,20 @@ function handleInit(message) {
   state.permissions = message.permissions;
   state.users = new Map(message.users.map((user) => [user.id, user]));
 
+  state.workspaces = message.workspaces || [];
+  state.workspaceId = message.workspaceId;
+  state.pendingWorkspaceId = null;
+  state.pendingEvents = [];
+  state.stateVersion = 0;
+
   state.board.setBoardSize(message.board.width, message.board.height);
   state.board.setObjects(message.objects);
   state.board.clearCursors();
+  state.board.setInteractive(true);
   state.ready = true;
 
   renderUsers();
+  renderPages();
   updateToolbar();
   setStatus('online', 'Подключено');
 
@@ -625,6 +846,7 @@ function handleInit(message) {
   if (session) {
     session.user = state.user;
     session.permissions = state.permissions;
+    session.workspaceId = state.workspaceId;
     saveSession(session);
   }
 }
@@ -708,7 +930,7 @@ function setupCursorBroadcast() {
     lastSent = now;
     const point = state.board?.getPointer();
     if (!point) return;
-    state.sync?.send({ type: 'cursor', x: round(point.x), y: round(point.y) });
+    sendWorkspace({ type: 'cursor', x: round(point.x), y: round(point.y) });
   });
 }
 
@@ -745,7 +967,7 @@ function bindKeyboard() {
         return;
       }
       state.board.removeObject(selectedId);
-      state.sync?.send({ type: 'object_delete', objectId: selectedId });
+      sendWorkspace({ type: 'object_delete', objectId: selectedId });
       return;
     }
 
