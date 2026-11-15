@@ -484,3 +484,54 @@ async def test_manual_switch_does_not_cancel_pending_pull(tmp_path: Path) -> Non
     assert socket.messages[-1]["stateVersion"] == 2
     await manager.shutdown()
     await store.close()
+
+
+async def test_new_pull_replaces_previous(tmp_path: Path) -> None:
+    _, store, manager = build_manager(tmp_path)
+    room = await manager.get_or_create("r1")
+    second = manager.create_workspace(room, "Вторая")
+    third = manager.create_workspace(room, "Третья")
+    teacher, _ = make_user("t", role="teacher")
+    student, socket = make_user("s", role="student")
+    await manager.join("r1", teacher)
+    await manager.join("r1", student)
+    teacher.workspace_id = second["id"]
+    socket.messages.clear()
+
+    await manager.pull_users(room, teacher, client_ids=["s"], all=False)
+    first_prepare = socket.messages[-1]
+    assert first_prepare["workspaceId"] == second["id"]
+
+    teacher.workspace_id = third["id"]
+    await manager.pull_users(room, teacher, client_ids=["s"], all=False)
+    second_prepare = socket.messages[-1]
+    assert second_prepare["workspaceId"] == third["id"]
+
+    assert await manager.handle_move_ack(room, student, first_prepare["requestId"]) is False
+    assert student.workspace_id == "ws_default"
+    assert await manager.handle_move_ack(room, student, second_prepare["requestId"]) is True
+    assert student.workspace_id == third["id"]
+    await manager.shutdown()
+    await store.close()
+
+
+async def test_disconnect_cancels_pending(tmp_path: Path) -> None:
+    settings, store, manager = build_manager(tmp_path)
+    settings = settings.model_copy(update={"workspace_move_timeout_seconds": 0.05})
+    manager.settings = settings
+    room = await manager.get_or_create("r1")
+    second = manager.create_workspace(room, "Вторая")
+    teacher, _ = make_user("t", role="teacher")
+    student, socket = make_user("s", role="student")
+    await manager.join("r1", teacher)
+    await manager.join("r1", student)
+    teacher.workspace_id = second["id"]
+    socket.messages.clear()
+    await manager.pull_users(room, teacher, client_ids=["s"], all=False)
+    assert student.pending_move is not None
+    await manager.leave("r1", student.id)
+    assert student.pending_move is None
+    await asyncio.sleep(0.12)
+    assert student.workspace_id == "ws_default"
+    await manager.shutdown()
+    await store.close()
