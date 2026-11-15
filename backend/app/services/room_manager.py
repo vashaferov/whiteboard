@@ -856,7 +856,12 @@ class RoomManager:
                     await self._handle_remote_pull(room, event)
                     continue
                 await self._apply_remote_event(room, event)
-                await self._send_local(room, event, exclude=envelope.get("exclude"))
+                await self._send_local(
+                    room,
+                    event,
+                    exclude=envelope.get("exclude"),
+                    workspace_id=event.get("workspaceId"),
+                )
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - a broken subscriber must not kill the app

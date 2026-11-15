@@ -300,3 +300,100 @@ async def test_remote_pull_prepares_on_owner_instance(settings, tmp_path, redis_
     assert student.workspace_id == extra["id"]
     await manager_a.shutdown()
     await manager_b.shutdown()
+
+
+async def test_remote_object_delivery_is_workspace_scoped(settings, tmp_path, redis_pair) -> None:
+    first_redis, second_redis = redis_pair
+    manager_a = make_manager(settings, tmp_path, "a", first_redis)
+    manager_b = make_manager(settings, tmp_path, "b", second_redis)
+    await manager_a.startup()
+    await manager_b.startup()
+
+    teacher, _ = make_user("t", "teacher")
+    page_a_user, socket_a = make_user("u-a")
+    page_b_user, socket_b = make_user("u-b")
+    room_a = await manager_a.join("lesson", teacher)
+    room_b = await manager_b.join("lesson", page_a_user)
+    await manager_b.join("lesson", page_b_user)
+    extra = manager_a.create_workspace(room_a, "Вторая")
+    await manager_a.broadcast(room_a, {"type": "workspace_created", "workspace": extra})
+    # Wait until the metadata event has reached both local users before clearing.
+    await wait_for(lambda: any(m["type"] == "workspace_created" for m in socket_a.messages))
+    await wait_for(lambda: any(m["type"] == "workspace_created" for m in socket_b.messages))
+    page_b_user.workspace_id = extra["id"]
+    socket_a.messages.clear()
+    socket_b.messages.clear()
+
+    manager_a.add_object(room_a, {"id": "shape-b", "type": "shape"}, extra["id"])
+    await manager_a.broadcast(
+        room_a,
+        {
+            "type": "shape_add",
+            "workspaceId": extra["id"],
+            "object": room_a.get_object("shape-b"),
+        },
+    )
+
+    await wait_for(lambda: any(m["type"] == "shape_add" for m in socket_b.messages))
+    assert room_b.get_object("shape-b") is not None
+    assert socket_a.messages == []
+    assert [m["type"] for m in socket_b.messages] == ["shape_add"]
+    await manager_a.shutdown()
+    await manager_b.shutdown()
+
+
+async def test_redis_clear_and_delete_are_page_scoped(settings, tmp_path, redis_pair) -> None:
+    first_redis, _second_redis = redis_pair
+    manager = make_manager(settings, tmp_path, "a", first_redis)
+    await manager.startup()
+    room = await manager.get_or_create("lesson")
+    second = manager.create_workspace(room, "Вторая")
+    await manager.broadcast(room, {"type": "workspace_created", "workspace": second})
+    manager.add_object(room, {"id": "o-default", "type": "shape"}, "ws_default")
+    manager.add_object(room, {"id": "o-second", "type": "shape"}, second["id"])
+    await manager.broadcast(
+        room,
+        {
+            "type": "shape_add",
+            "workspaceId": "ws_default",
+            "object": room.get_object("o-default"),
+        },
+    )
+    await manager.broadcast(
+        room,
+        {"type": "shape_add", "workspaceId": second["id"], "object": room.get_object("o-second")},
+    )
+
+    objects_key = "whiteboard:room:lesson:objects"
+    workspaces_key = "whiteboard:room:lesson:workspaces"
+    assert await first_redis.hget(objects_key, "o-default") is not None
+    assert await first_redis.hget(objects_key, "o-second") is not None
+
+    # clear only page B's objects.
+    manager.clear_room(room, second["id"])
+    await manager.broadcast(
+        room, {"type": "clear", "id": "t", "workspaceId": second["id"]}, workspace_id=second["id"]
+    )
+    assert await first_redis.hget(objects_key, "o-second") is None
+    assert await first_redis.hget(objects_key, "o-default") is not None
+
+    # delete page B removes its metadata and objects, leaving page A intact.
+    manager.add_object(room, {"id": "o-second2", "type": "shape"}, second["id"])
+    await manager.broadcast(
+        room,
+        {"type": "shape_add", "workspaceId": second["id"], "object": room.get_object("o-second2")},
+    )
+    manager.delete_workspace(room, second["id"])
+    await manager.broadcast(
+        room,
+        {
+            "type": "workspace_deleted",
+            "workspaceId": second["id"],
+            "fallbackId": "ws_default",
+        },
+    )
+    assert await first_redis.hget(workspaces_key, second["id"]) is None
+    assert await first_redis.hget(workspaces_key, "ws_default") is not None
+    assert await first_redis.hget(objects_key, "o-second2") is None
+    assert await first_redis.hget(objects_key, "o-default") is not None
+    await manager.shutdown()
