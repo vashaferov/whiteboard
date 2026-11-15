@@ -575,7 +575,7 @@ class RoomManager:
                 return True
             await self.broadcast(
                 room,
-                {"type": "cursor_remove", "id": user.id},
+                {"type": "cursor_remove", "id": user.id, "workspaceId": old_id},
                 workspace_id=old_id,
             )
             await self._finalize_strokes(room, user)

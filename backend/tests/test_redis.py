@@ -511,3 +511,52 @@ async def test_finalized_stroke_end_is_workspace_scoped(settings, tmp_path, redi
 
     await manager_a.shutdown()
     await manager_b.shutdown()
+
+
+async def test_cursor_remove_is_workspace_scoped(settings, tmp_path, redis_pair) -> None:
+    first_redis, second_redis = redis_pair
+    manager_a = make_manager(settings, tmp_path, "a", first_redis)
+    manager_b = make_manager(settings, tmp_path, "b", second_redis)
+    await manager_a.startup()
+    await manager_b.startup()
+
+    mover, mover_socket = make_user("u-a")
+    other_page, other_socket = make_user("u-b")
+    same_page, same_socket = make_user("u-c")
+
+    room_a = await manager_a.join("lesson", mover)
+    room_b = await manager_b.join("lesson", other_page)
+    await manager_b.join("lesson", same_page)
+
+    second = manager_a.create_workspace(room_a, "Вторая")
+    third = manager_a.create_workspace(room_a, "Третья")
+    await manager_a.broadcast(room_a, {"type": "workspace_created", "workspace": second})
+    await manager_a.broadcast(room_a, {"type": "workspace_created", "workspace": third})
+    await wait_for(
+        lambda: (
+            room_b.get_workspace(second["id"]) is not None
+            and room_b.get_workspace(third["id"]) is not None
+        )
+    )
+
+    mover.workspace_id = "ws_default"
+    other_page.workspace_id = third["id"]
+    same_page.workspace_id = "ws_default"
+
+    mover_socket.messages.clear()
+    other_socket.messages.clear()
+    same_socket.messages.clear()
+
+    assert await manager_a.switch_workspace(room_a, mover, second["id"]) is True
+
+    # The viewer still on the default page receives the mover's cursor_remove.
+    await wait_for(lambda: any(m["type"] == "cursor_remove" for m in same_socket.messages))
+    removed = next(m for m in same_socket.messages if m["type"] == "cursor_remove")
+    assert removed["id"] == "u-a"
+    assert removed["workspaceId"] == "ws_default"
+
+    # The user on another page must not receive the cursor_remove.
+    assert all(m["type"] != "cursor_remove" for m in other_socket.messages)
+
+    await manager_a.shutdown()
+    await manager_b.shutdown()
