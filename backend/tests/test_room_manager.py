@@ -246,7 +246,9 @@ async def test_broadcast_filters_by_workspace(tmp_path: Path) -> None:
     second_user.workspace_id = second["id"]
     await manager.join("r1", first_user)
     await manager.join("r1", second_user)
-    await manager.broadcast(room, {"type": "shape_add", "workspaceId": "ws_default"})
+    await manager.broadcast(
+        room, {"type": "shape_add", "workspaceId": "ws_default"}, workspace_id="ws_default"
+    )
     assert [m["type"] for m in first_socket.messages] == ["shape_add"]
     assert second_socket.messages == []
     await manager.shutdown()
@@ -302,4 +304,69 @@ async def test_delete_discards_active_strokes_on_that_page(tmp_path: Path) -> No
     assert user.strokes == {}
     assert room.objects == []
     await manager.shutdown()
+    await store.close()
+
+
+async def test_add_workspace_position_after_delete(tmp_path: Path) -> None:
+    _, store, manager = build_manager(tmp_path)
+    room = await manager.get_or_create("r1")
+    second = manager.create_workspace(room, "Вторая")
+    third = manager.create_workspace(room, "Третья")
+    before = manager.create_workspace(room, "До удаления")
+    assert room.workspace_ids() == ["ws_default", second["id"], third["id"], before["id"]]
+
+    assert manager.delete_workspace(room, "ws_default")[1] == second["id"]
+
+    fourth = manager.create_workspace(room, "Четвёртая")
+    ordered = room.workspace_list()
+    assert [ws["id"] for ws in ordered] == [second["id"], third["id"], before["id"], fourth["id"]]
+    assert [ws["position"] for ws in ordered] == [0, 1, 2, 3]
+    await manager.shutdown()
+    await store.close()
+
+
+async def test_reorder_rejects_duplicate_ids(tmp_path: Path) -> None:
+    _, store, manager = build_manager(tmp_path)
+    room = await manager.get_or_create("r1")
+    assert room.workspace_ids() == ["ws_default"]
+    assert manager.reorder_workspaces(room, ["ws_default", "ws_default"]) is False
+    assert room.workspace_ids() == ["ws_default"]
+    await manager.shutdown()
+    await store.close()
+
+
+async def test_move_users_from_deleted_switches_users(tmp_path: Path) -> None:
+    _, store, manager = build_manager(tmp_path)
+    room = await manager.get_or_create("r1")
+    second = manager.create_workspace(room, "Вторая")
+    user, socket = make_user("a", role="student")
+    await manager.join("r1", user)
+    user.workspace_id = second["id"]
+    socket.messages.clear()
+
+    deleted, fallback = manager.delete_workspace(room, second["id"])
+    assert deleted["id"] == second["id"]
+    assert fallback == "ws_default"
+
+    await manager.move_users_from_deleted(room, second["id"], fallback)
+    assert user.workspace_id == fallback
+    assert socket.messages[-1]["type"] == "workspace_state"
+    assert socket.messages[-1]["workspaceId"] == fallback
+    await manager.shutdown()
+    await store.close()
+
+
+async def test_workspace_list_persists_across_managers(tmp_path: Path) -> None:
+    settings, store, manager = build_manager(tmp_path)
+    room = await manager.get_or_create("r1")
+    manager.create_workspace(room, "Черновик")
+    manager.rename_workspace(room, "ws_default", "Главная")
+    await manager.shutdown()
+
+    manager2 = RoomManager(settings, store)
+    restored = await manager2.get_or_create("r1")
+    assert [ws["id"] for ws in restored.workspace_list()] == room.workspace_ids()
+    assert [ws["name"] for ws in restored.workspace_list()] == ["Главная", "Черновик"]
+    assert [ws["position"] for ws in restored.workspace_list()] == [0, 1]
+    await manager2.shutdown()
     await store.close()

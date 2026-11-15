@@ -152,7 +152,10 @@ class Room:
         return self.workspaces.get(workspace_id)
 
     def add_workspace(self, name: str) -> dict[str, Any]:
-        workspace = {"id": new_workspace_id(), "name": name, "position": len(self.workspaces)}
+        position = (
+            max((workspace["position"] for workspace in self.workspaces.values()), default=-1) + 1
+        )
+        workspace = {"id": new_workspace_id(), "name": name, "position": position}
         self.workspaces[workspace["id"]] = workspace
         return workspace
 
@@ -169,11 +172,13 @@ class Room:
             return None, None
         removed = self.workspaces.pop(workspace_id)
         self.clear_workspace(workspace_id)
+        for position, remaining_id in enumerate(self.workspace_ids()):
+            self.workspaces[remaining_id]["position"] = position
         remaining = self.workspace_ids()
         return removed, remaining[0] if remaining else None
 
     def reorder_workspaces(self, ids: list[str]) -> bool:
-        if set(ids) != set(self.workspaces):
+        if len(ids) != len(set(ids)) or set(ids) != set(self.workspaces):
             return False
         for position, workspace_id in enumerate(ids):
             self.workspaces[workspace_id]["position"] = position
@@ -350,8 +355,6 @@ class RoomManager:
         exclude: str | None = None,
         workspace_id: str | None = None,
     ) -> None:
-        if workspace_id is None:
-            workspace_id = message.get("workspaceId")
         await self._send_local(room, message, exclude=exclude, workspace_id=workspace_id)
         if self._redis is not None:
             try:
