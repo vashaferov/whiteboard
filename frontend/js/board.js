@@ -30,6 +30,8 @@ export class Board {
     this.onEditText = options.onEditText ?? (() => {});
     this.editPredicate = options.canEditObject ?? (() => false);
     this.deletePredicate = options.canDeleteObject ?? this.editPredicate;
+    this.onFrameMove = options.onFrameMove ?? (() => {});
+    this.onSelectObject = options.onSelectObject ?? (() => {});
 
     this.scale = 1;
     this.offsetX = 0;
@@ -182,6 +184,9 @@ export class Board {
       case 'connector':
         node = this._createConnectorNode(object);
         break;
+      case 'frame':
+        node = this._createFrameNode(object);
+        break;
       default:
         return null;
     }
@@ -189,7 +194,8 @@ export class Board {
 
     node.id(object.id);
     this.contentLayer.add(node);
-    node.moveToTop();
+    if (object.type === 'frame') node.moveToBottom();
+    else node.moveToTop();
     this.transformer.moveToTop();
 
     const entry = { data: { ...object }, node };
@@ -197,6 +203,11 @@ export class Board {
       entry.points = [...(object.points ?? [])];
     }
     this.objects.set(object.id, entry);
+    if (object.type === 'frame') {
+      this._captureLocally(entry.data);
+    } else if (entry.data.frameId === undefined) {
+      entry.data.frameId = this._frameFor(entry.data);
+    }
     this._applyDraggable(entry);
     this._bindTransform(entry);
     return node;
@@ -283,6 +294,17 @@ export class Board {
         strokeWidth,
         fill,
         cornerRadius: Math.min(absWidth, absHeight) / 2,
+      });
+    } else if (shapeType === 'frame') {
+      shape = new Konva.Rect({
+        x: 0,
+        y: 0,
+        width: absWidth,
+        height: absHeight,
+        stroke: color,
+        strokeWidth,
+        dash: [6, 4],
+        fill: 'rgba(148, 163, 184, 0.08)',
       });
     } else {
       shape = new Konva.Line({
@@ -376,6 +398,163 @@ export class Board {
   }
 
   // Авторитетные данные штриха приходят в stroke_end — заменяем локальные точки.
+  _createFrameNode(object) {
+    const group = new Konva.Group({
+      x: object.x,
+      y: object.y,
+      rotation: 0,
+    });
+    const background = new Konva.Rect({
+      x: 0,
+      y: 0,
+      width: Math.abs(object.width),
+      height: Math.abs(object.height),
+      fill: object.fill || '#ffffff',
+      stroke: object.stroke || '#94a3b8',
+      strokeWidth: object.strokeWidth || 2,
+      cornerRadius: 4,
+      name: 'frame-bg',
+    });
+    group.add(background);
+
+    const pattern = new Konva.Shape({
+      x: 0,
+      y: 0,
+      width: Math.abs(object.width),
+      height: Math.abs(object.height),
+      listening: false,
+      name: 'frame-pattern',
+      pattern: object.pattern || 'none',
+      sceneFunc: (context, shape) => {
+        const width = shape.width();
+        const height = shape.height();
+        const mode = shape.getAttr('pattern');
+        if (mode !== 'lines' && mode !== 'grid') return;
+        context.beginPath();
+        context.rect(0, 0, width, height);
+        context.clip();
+        context.strokeStyle = '#cbd5e1';
+        context.lineWidth = 1;
+        const step = 24;
+        for (let y = step; y < height; y += step) {
+          context.beginPath();
+          context.moveTo(0, y);
+          context.lineTo(width, y);
+          context.stroke();
+        }
+        if (mode === 'grid') {
+          for (let x = step; x < width; x += step) {
+            context.beginPath();
+            context.moveTo(x, 0);
+            context.lineTo(x, height);
+            context.stroke();
+          }
+        }
+      },
+    });
+    group.add(pattern);
+    return group;
+  }
+
+  _applyFrameStyle(node, data) {
+    const background = node.findOne('.frame-bg');
+    const pattern = node.findOne('.frame-pattern');
+    if (!background) return;
+    const width = Math.abs(data.width ?? 0);
+    const height = Math.abs(data.height ?? 0);
+    background.width(width);
+    background.height(height);
+    if (data.fill !== undefined) background.fill(data.fill || '#ffffff');
+    if (data.stroke !== undefined) background.stroke(data.stroke || '#94a3b8');
+    if (data.strokeWidth !== undefined) {
+      background.strokeWidth(data.strokeWidth || 2);
+    }
+    if (pattern) {
+      pattern.width(width);
+      pattern.height(height);
+      if (data.pattern !== undefined) {
+        pattern.setAttr('pattern', data.pattern || 'none');
+      }
+    }
+    this.contentLayer.batchDraw();
+  }
+
+  applyFrameMove(message) {
+    const frame = this.objects.get(message.frameId);
+    if (frame) {
+      frame.data.x = message.x;
+      frame.data.y = message.y;
+      frame.node.position({ x: message.x, y: message.y });
+    }
+    for (const child of message.children ?? []) {
+      const entry = this.objects.get(child.id);
+      if (!entry) continue;
+      entry.data.x = child.x;
+      entry.data.y = child.y;
+      entry.node.position({ x: child.x, y: child.y });
+      if (entry.data.type === 'shape' && FLOW_SHAPES.has(entry.data.shapeType)) {
+        this._updateConnectorsFor(child.id);
+      }
+    }
+    this.contentLayer.batchDraw();
+  }
+
+  setFrameChildren(frameId, objectIds) {
+    for (const objectId of objectIds) {
+      const entry = this.objects.get(objectId);
+      if (entry) entry.data.frameId = frameId;
+    }
+  }
+
+  setFrameStyle(objectId, { fill, pattern }) {
+    const entry = this.objects.get(objectId);
+    if (!entry || entry.data.type !== 'frame') return;
+    entry.data.fill = fill;
+    entry.data.pattern = pattern;
+    this._applyFrameStyle(entry.node, entry.data);
+  }
+
+  _frameFor(data) {
+    if (data.type === 'frame' || data.type === 'connector') return null;
+    let anchor = null;
+    if (data.type === 'text') {
+      anchor = { x: data.x, y: data.y };
+    } else if (data.type === 'shape' || data.type === 'image') {
+      anchor = {
+        x: data.x + (data.width ?? 0) / 2,
+        y: data.y + (data.height ?? 0) / 2,
+      };
+    }
+    if (!anchor) return null;
+    let match = null;
+    for (const entry of this.objects.values()) {
+      const frame = entry.data;
+      if (frame.type !== 'frame') continue;
+      const left = Math.min(frame.x, frame.x + frame.width);
+      const top = Math.min(frame.y, frame.y + frame.height);
+      const right = Math.max(frame.x, frame.x + frame.width);
+      const bottom = Math.max(frame.y, frame.y + frame.height);
+      if (
+        anchor.x >= left &&
+        anchor.x <= right &&
+        anchor.y >= top &&
+        anchor.y <= bottom
+      ) {
+        match = frame;
+      }
+    }
+    return match ? match.id : null;
+  }
+
+  _captureLocally(frame) {
+    for (const entry of this.objects.values()) {
+      const data = entry.data;
+      if (entry.data.type === 'frame' && data.id === frame.id) continue;
+      if (data.frameId !== undefined && data.frameId !== null) continue;
+      if (this._frameFor(data) === frame.id) data.frameId = frame.id;
+    }
+  }
+
   _createConnectorNode(object) {
     const points = this._connectorPoints(object.fromId, object.toId);
     if (!points) return null;
@@ -489,7 +668,7 @@ export class Board {
     this.contentLayer.batchDraw();
   }
 
-  updateObjectPosition(objectId, x, y) {
+  updateObjectPosition(objectId, x, y, frameId) {
     const entry = this.objects.get(objectId);
     if (!entry) return;
     entry.data.x = x;
@@ -498,6 +677,8 @@ export class Board {
       entry.node.position({ x, y });
       this.contentLayer.batchDraw();
     }
+    if (frameId !== undefined) entry.data.frameId = frameId;
+    else entry.data.frameId = this._frameFor(entry.data);
     if (
       entry.data.type === 'shape' &&
       FLOW_SHAPES.has(entry.data.shapeType)
@@ -544,6 +725,11 @@ export class Board {
         child.width(entry.data.width);
         child.height(entry.data.height);
       }
+    } else if (entry.data.type === 'frame') {
+      this._applyFrameStyle(node, entry.data);
+    }
+    if (entry.data.type !== 'frame' && entry.data.type !== 'connector') {
+      entry.data.frameId = this._frameFor(entry.data);
     }
     this.contentLayer.batchDraw();
   }
@@ -644,6 +830,11 @@ export class Board {
   removeObject(objectId) {
     const entry = this.objects.get(objectId);
     if (!entry) return;
+    if (entry.data.type === 'frame') {
+      for (const [id, item] of [...this.objects]) {
+        if (item.data.frameId === objectId) this.removeObject(id);
+      }
+    }
     if (entry.data.type === 'shape' && FLOW_SHAPES.has(entry.data.shapeType)) {
       for (const [id, item] of [...this.objects]) {
         if (
@@ -697,6 +888,7 @@ export class Board {
     } else {
       this.transformer.nodes([]);
     }
+    this.onSelectObject?.(objectId);
     this.contentLayer.batchDraw();
   }
 
@@ -818,15 +1010,53 @@ export class Board {
     entry.node.draggable(allowed);
     if (allowed && !entry.dragBound) {
       entry.dragBound = true;
+      entry.node.on('dragstart', () => {
+        if (entry.data.type !== 'frame') return;
+        entry.frameStart = { x: entry.node.x(), y: entry.node.y() };
+        entry.childStarts = [];
+        for (const [id, child] of this.objects) {
+          if (child.data.frameId === entry.data.id && child.data.type !== 'connector') {
+            entry.childStarts.push({ id, x: child.node.x(), y: child.node.y() });
+          }
+        }
+      });
       entry.node.on('dragmove', () => {
+        if (entry.data.type === 'frame') {
+          const dx = entry.node.x() - entry.frameStart.x;
+          const dy = entry.node.y() - entry.frameStart.y;
+          for (const start of entry.childStarts ?? []) {
+            const child = this.objects.get(start.id);
+            if (!child) continue;
+            child.node.position({ x: start.x + dx, y: start.y + dy });
+            if (child.data.type === 'shape' && FLOW_SHAPES.has(child.data.shapeType)) {
+              this._updateConnectorsFor(start.id);
+            }
+          }
+          this.contentLayer.batchDraw();
+          return;
+        }
         if (entry.data.type === 'shape' && FLOW_SHAPES.has(entry.data.shapeType)) {
           this._updateConnectorsFor(entry.data.id);
         }
       });
       entry.node.on('dragend', () => {
+        if (entry.data.type === 'frame') {
+          const position = entry.node.position();
+          for (const start of entry.childStarts ?? []) {
+            const child = this.objects.get(start.id);
+            if (!child) continue;
+            child.data.x = child.node.x();
+            child.data.y = child.node.y();
+          }
+          entry.data.x = position.x;
+          entry.data.y = position.y;
+          this.onFrameMove(entry.data.id, position.x, position.y);
+          return;
+        }
         const position = entry.node.position();
         entry.data.x = position.x;
         entry.data.y = position.y;
+        entry.data.frameId = this._frameFor(entry.data);
         if (entry.data.type === 'shape' && FLOW_SHAPES.has(entry.data.shapeType)) {
           this._updateConnectorsFor(entry.data.id);
         }

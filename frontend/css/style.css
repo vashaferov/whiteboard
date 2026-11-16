@@ -1101,3 +1101,59 @@ kbd {
   font-size: 12px;
   color: var(--muted);
 }
+
+.frame-panel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.frame-panel__label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.frame-panel__pattern.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.frame-panel__colors {
+  display: flex;
+  gap: 4px;
+}
+
+.frame-color {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.frame-color.is-active {
+  border-color: #0f172a;
+}
+
+.admin-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.admin-filters .field--inline {
+  margin-bottom: 0;
+}
+
+.admin-filters__search {
+  max-width: 260px;
+  margin-bottom: 0;
+}

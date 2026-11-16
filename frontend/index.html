@@ -121,16 +121,25 @@
           </div>
 
           <div id="admin-users-panel">
-            <label class="field field--inline">
-              <span>Статус</span>
-              <select id="admin-status-filter">
-                <option value="">Все</option>
-                <option value="pending">Заявки</option>
-                <option value="active">Активные</option>
-                <option value="blocked">Заблокированные</option>
-                <option value="rejected">Отклонённые</option>
-              </select>
-            </label>
+            <div class="admin-filters">
+              <label class="field field--inline">
+                <span>Статус</span>
+                <select id="admin-status-filter">
+                  <option value="">Все</option>
+                  <option value="pending">Заявки</option>
+                  <option value="active">Активные</option>
+                  <option value="blocked">Заблокированные</option>
+                  <option value="rejected">Отклонённые</option>
+                </select>
+              </label>
+              <input
+                id="admin-search"
+                class="access-dialog__search admin-filters__search"
+                type="search"
+                placeholder="Поиск по логину или имени"
+                autocomplete="off"
+              />
+            </div>
             <ul id="admin-users" class="admin-list"></ul>
           </div>
 
@@ -199,6 +208,9 @@
           <button class="tool" data-tool="terminator" title="Блок: начало/конец (S)" aria-label="Начало или конец">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="7" width="16" height="10" rx="5" /></svg>
           </button>
+          <button class="tool" data-tool="frame" title="Фрейм (F)" aria-label="Фрейм">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" stroke-dasharray="3 2" /></svg>
+          </button>
           <button class="tool" data-tool="text" title="Текст (T)" aria-label="Текст">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M12 5v15M9 20h6" /></svg>
           </button>
@@ -210,6 +222,14 @@
           <input id="width-range" type="range" min="1" max="30" step="1" value="4" />
           <span id="width-value">4 px</span>
         </label>
+
+        <div id="frame-panel" class="frame-panel" hidden>
+          <span class="frame-panel__label">Фон</span>
+          <button id="frame-pattern-none" class="btn btn--small frame-panel__pattern" type="button">Нет</button>
+          <button id="frame-pattern-lines" class="btn btn--small frame-panel__pattern" type="button">Линии</button>
+          <button id="frame-pattern-grid" class="btn btn--small frame-panel__pattern" type="button">Клетка</button>
+          <div id="frame-colors" class="frame-panel__colors" aria-label="Цвет фона"></div>
+        </div>
 
         <div class="toolbar__spacer"></div>
 

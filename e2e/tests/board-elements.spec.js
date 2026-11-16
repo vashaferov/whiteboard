@@ -318,3 +318,168 @@ test('flowchart: connectors follow blocks and disappear with them', async ({ bro
 
   await context.close();
 });
+
+async function drawWithTool(page, tool, from, to) {
+  await page.click(`[data-tool="${tool}"]`);
+  const start = await worldToScreen(page, from);
+  const end = await worldToScreen(page, to);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 6 });
+  await page.mouse.up();
+}
+
+function rectPositions(page) {
+  return page.evaluate(() =>
+    window.Konva.stages[0]
+      .getLayers()[1]
+      .getChildren(
+        (node) =>
+          node.getClassName() === 'Group' &&
+          !node.findOne('.frame-bg') &&
+          !node.findOne('Text') &&
+          node.getChildren().some((child) => child.getClassName() === 'Rect'),
+      )
+      .map((group) => ({ id: group.id(), x: group.x(), y: group.y() })),
+  );
+}
+
+test('frames: backgrounds, captured children and moving together', async ({ browser, request }) => {
+  const setup = await lessonSetup(request, { name: 'Frames', student: false });
+  const context = await browser.newContext();
+  const teacher = await context.newPage();
+  await signInWith(request, teacher, setup.teacherLogin);
+  await openRoom(teacher, setup.room.id);
+
+  await drawWithTool(teacher, 'frame', { x: 150, y: 150 }, { x: 600, y: 550 });
+  await expect.poll(() => objectCount(teacher)).toBe(1);
+
+  await teacher.click('[data-tool="select"]');
+  await clickWorld(teacher, { x: 560, y: 520 });
+  await expect(teacher.locator('#frame-panel')).toBeVisible();
+
+  await teacher.click('#frame-pattern-grid');
+  await expect
+    .poll(() =>
+      teacher.evaluate(() => {
+        const layer = window.Konva.stages[0].getLayers()[1];
+        const frame = layer.getChildren((node) => Boolean(node.findOne('.frame-bg')))[0];
+        return frame?.findOne('.frame-pattern')?.getAttr('pattern');
+      }),
+    )
+    .toBe('grid');
+
+  await teacher.locator('#frame-colors .frame-color').nth(2).click();
+
+  await drawWithTool(teacher, 'rect', { x: 250, y: 250 }, { x: 380, y: 340 });
+  await expect.poll(() => objectCount(teacher)).toBe(2);
+
+  const before = await rectPositions(teacher);
+  await teacher.click('[data-tool="select"]');
+  const frameHandle = await worldToScreen(teacher, { x: 560, y: 520 });
+  await teacher.mouse.move(frameHandle.x, frameHandle.y);
+  await teacher.mouse.down();
+  await teacher.mouse.move(frameHandle.x + 100, frameHandle.y + 60, { steps: 6 });
+  await teacher.mouse.up();
+
+  await expect
+    .poll(async () => {
+      const after = await rectPositions(teacher);
+      return Math.round(after[0].x - before[0].x);
+    })
+    .toBeGreaterThan(50);
+
+  await reloadAndWait(teacher);
+  await expect.poll(() => objectCount(teacher)).toBe(2);
+  await expect
+    .poll(() =>
+      teacher.evaluate(() => {
+        const layer = window.Konva.stages[0].getLayers()[1];
+        const frame = layer.getChildren((node) => Boolean(node.findOne('.frame-bg')))[0];
+        return frame?.findOne('.frame-pattern')?.getAttr('pattern');
+      }),
+    )
+    .toBe('grid');
+
+  await context.close();
+});
+
+test('frames: dragging a child out detaches it and resize keeps children', async ({
+  browser,
+  request,
+}) => {
+  const setup = await lessonSetup(request, { name: 'Frame detach', student: false });
+  const context = await browser.newContext();
+  const teacher = await context.newPage();
+  await signInWith(request, teacher, setup.teacherLogin);
+  await openRoom(teacher, setup.room.id);
+
+  await drawWithTool(teacher, 'frame', { x: 100, y: 100 }, { x: 600, y: 500 });
+  await drawWithTool(teacher, 'rect', { x: 200, y: 200 }, { x: 300, y: 280 });
+  await expect.poll(() => objectCount(teacher)).toBe(2);
+
+  await teacher.click('[data-tool="select"]');
+  const rectCenter = await worldToScreen(teacher, { x: 250, y: 240 });
+  await teacher.mouse.move(rectCenter.x, rectCenter.y);
+  await teacher.mouse.down();
+  await teacher.mouse.move(rectCenter.x + 500, rectCenter.y + 300, { steps: 8 });
+  await teacher.mouse.up();
+
+  await expect
+    .poll(async () => (await rectPositions(teacher))[0].x)
+    .toBeGreaterThan(600);
+  const detached = await rectPositions(teacher);
+
+  const frameHandle = await worldToScreen(teacher, { x: 550, y: 450 });
+  await teacher.mouse.move(frameHandle.x, frameHandle.y);
+  await teacher.mouse.down();
+  await teacher.mouse.move(frameHandle.x + 50, frameHandle.y + 40, { steps: 6 });
+  await teacher.mouse.up();
+
+  await expect
+    .poll(async () => (await rectPositions(teacher))[0].x)
+    .toBeCloseTo(detached[0].x, 0);
+
+  const anchor = await transformerAnchor(teacher, 'bottom-right');
+  await dragBy(teacher, anchor, -80, -60);
+  await expect
+    .poll(async () => (await rectPositions(teacher))[0].x)
+    .toBeCloseTo(detached[0].x, 0);
+
+  await teacher.click('[data-tool="select"]');
+  await clickWorld(teacher, { x: 300, y: 300 });
+  teacher.once('dialog', (dialog) => dialog.accept());
+  await teacher.keyboard.press('Delete');
+  await expect.poll(() => objectCount(teacher)).toBe(1);
+
+  await context.close();
+});
+
+test('frames: only the owner or staff can erase a frame with foreign content', async ({
+  browser,
+  request,
+}) => {
+  const setup = await lessonSetup(request, { name: 'Frame rights' });
+  const { teacherContext, studentContext, teacher, student } = await openLesson(
+    request,
+    browser,
+    setup,
+  );
+
+  await drawWithTool(student, 'frame', { x: 150, y: 150 }, { x: 500, y: 450 });
+  await waitForObjectCount(teacher, 1);
+  await drawRect(teacher, { x: 250, y: 250 }, { x: 350, y: 330 });
+  await waitForObjectCount(student, 2);
+
+  await student.click('[data-tool="eraser"]');
+  await eraseAt(student, { x: 150, y: 300 });
+  await expect.poll(() => objectCount(student)).toBe(2);
+
+  await teacher.click('[data-tool="eraser"]');
+  await eraseAt(teacher, { x: 150, y: 300 });
+  await expect.poll(() => objectCount(teacher)).toBe(0);
+  await expect.poll(() => objectCount(student)).toBe(0);
+
+  await teacherContext.close();
+  await studentContext.close();
+});

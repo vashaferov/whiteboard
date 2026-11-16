@@ -23,6 +23,7 @@ const TOOL_KEYS = {
   p: 'process',
   d: 'decision',
   s: 'terminator',
+  f: 'frame',
 };
 const FATAL_MESSAGES = {
   unauthorized: 'Сессия истекла — войдите снова',
@@ -102,6 +103,7 @@ function clearRoomState() {
 function init() {
   cacheElements();
   buildPalette();
+  buildFramePanel();
   bindToolbar();
   bindTextEditor();
   bindKeyboard();
@@ -153,6 +155,13 @@ function cacheElements() {
   els.pagesPanel = $('#pages-panel');
   els.status = $('#status');
   els.roomTitle = $('#room-title');
+  els.framePanel = $('#frame-panel');
+  els.frameColors = $('#frame-colors');
+  els.framePatternButtons = {
+    none: $('#frame-pattern-none'),
+    lines: $('#frame-pattern-lines'),
+    grid: $('#frame-pattern-grid'),
+  };
   els.userList = $('#user-list');
   els.userCount = $('#user-count');
   els.pullActions = $('#pull-actions');
@@ -229,7 +238,18 @@ function startRoom({ room, user, permissions, board }) {
     canDeleteObject: (object) => {
       if (!state.user) return false;
       if (isStaff(state.user.role)) return true;
-      return object.author === state.user.id;
+      if (object.author !== state.user.id) return false;
+      if (object.type === 'frame' && state.board) {
+        for (const entry of state.board.objects.values()) {
+          if (
+            entry.data.frameId === object.id &&
+            entry.data.author !== state.user.id
+          ) {
+            return false;
+          }
+        }
+      }
+      return true;
     },
     onObjectMove: (objectId, x, y) => {
       sendWorkspace({
@@ -247,6 +267,9 @@ function startRoom({ room, user, permissions, board }) {
       });
     },
     onEditText: (object) => openTextEditorForObject(object),
+    onFrameMove: (id, x, y) =>
+      sendWorkspace({ type: 'frame_move', objectId: id, x: round(x), y: round(y) }),
+    onSelectObject: () => updateFramePanel(),
   });
 
   state.tools = new ToolManager({
@@ -326,6 +349,7 @@ function leaveRoom(message = '') {
   clearRoomState();
   els.textEditor.hidden = true;
   els.textEditor.value = '';
+  els.framePanel.hidden = true;
   els.app.hidden = true;
   els.clearBtn.hidden = true;
   history.replaceState(null, '', '/');
@@ -372,6 +396,63 @@ function bindToolbar() {
   els.pullAll.addEventListener('click', () => {
     state.sync?.send({ type: 'workspace_pull', all: true });
   });
+}
+
+function canEditObject(object) {
+  return (
+    Boolean(state.user) &&
+    (isStaff(state.user.role) || object.author === state.user.id)
+  );
+}
+
+function selectedFrame() {
+  const id = state.board?.getSelectedId();
+  const data = id ? state.board.getObjectData(id) : null;
+  if (!data || data.type !== 'frame' || !canEditObject(data)) return null;
+  return data;
+}
+
+function buildFramePanel() {
+  for (const color of PALETTE) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'frame-color';
+    button.dataset.color = color;
+    button.style.backgroundColor = color;
+    button.title = color;
+    button.addEventListener('click', () => applyFrameStyle({ fill: color }));
+    els.frameColors.appendChild(button);
+  }
+  for (const [pattern, button] of Object.entries(els.framePatternButtons)) {
+    button.addEventListener('click', () => applyFrameStyle({ pattern }));
+  }
+}
+
+function updateFramePanel() {
+  if (!els.framePanel) return;
+  const frame = selectedFrame();
+  if (!frame) {
+    els.framePanel.hidden = true;
+    return;
+  }
+  els.framePanel.hidden = false;
+  for (const [pattern, button] of Object.entries(els.framePatternButtons)) {
+    button.classList.toggle('is-active', (frame.pattern || 'none') === pattern);
+  }
+  for (const button of els.frameColors.querySelectorAll('.frame-color')) {
+    button.classList.toggle('is-active', (frame.fill || '') === button.dataset.color);
+  }
+}
+
+function applyFrameStyle(patch) {
+  const frame = selectedFrame();
+  if (!frame) return;
+  const fill = patch.fill !== undefined ? patch.fill : frame.fill ?? null;
+  const pattern =
+    patch.pattern !== undefined ? patch.pattern : frame.pattern ?? 'none';
+  state.board.setFrameStyle(frame.id, { fill, pattern });
+  sendWorkspace({ type: 'frame_style', objectId: frame.id, fill, pattern });
+  updateFramePanel();
 }
 
 function buildPalette() {
@@ -713,6 +794,10 @@ function handleServerEvent(message) {
     case 'text_add':
     case 'image_add':
     case 'connector_add':
+    case 'frame_add':
+    case 'frame_captured':
+    case 'frame_moved':
+    case 'frame_style':
     case 'object_update':
     case 'object_transform':
     case 'text_update':
@@ -786,10 +871,28 @@ function applyObjectEvent(message) {
     case 'text_add':
     case 'image_add':
     case 'connector_add':
+    case 'frame_add':
       board.addObject(message.object);
       break;
+    case 'frame_captured':
+      board.setFrameChildren(message.frameId, message.objectIds ?? []);
+      break;
+    case 'frame_moved':
+      board.applyFrameMove(message);
+      break;
+    case 'frame_style':
+      board.setFrameStyle(message.objectId, {
+        fill: message.fill,
+        pattern: message.pattern,
+      });
+      break;
     case 'object_update':
-      board.updateObjectPosition(message.objectId, message.x, message.y);
+      board.updateObjectPosition(
+        message.objectId,
+        message.x,
+        message.y,
+        message.frameId,
+      );
       break;
     case 'object_transform':
     case 'text_update':
@@ -1091,6 +1194,13 @@ function bindKeyboard() {
       event.preventDefault();
       if (!state.permissions.canDelete) {
         toast('Удалять объекты может только учитель');
+        return;
+      }
+      const object = state.board.getObjectData(selectedId);
+      if (
+        object?.type === 'frame' &&
+        !window.confirm('Удалить фрейм и всё содержимое?')
+      ) {
         return;
       }
       state.board.removeObject(selectedId);

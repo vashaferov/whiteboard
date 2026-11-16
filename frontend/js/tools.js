@@ -12,6 +12,7 @@ const SHAPE_TOOLS = new Set([
   'process',
   'decision',
   'terminator',
+  'frame',
 ]);
 const FLOW_SHAPES = new Set(['process', 'decision', 'terminator']);
 const ERASER_RADIUS_MIN = 10;
@@ -23,7 +24,7 @@ function newId() {
 }
 
 function normalizeShape(tool, start, end) {
-  if (tool === 'rect' || tool === 'circle' || FLOW_SHAPES.has(tool)) {
+  if (tool === 'rect' || tool === 'circle' || tool === 'frame' || FLOW_SHAPES.has(tool)) {
     return {
       x: Math.min(start.x, end.x),
       y: Math.min(start.y, end.y),
@@ -264,6 +265,35 @@ export class ToolManager {
 
     const geometry = normalizeShape(this.tool, shape.start, shape.end);
     if (Math.abs(geometry.width) < 3 && Math.abs(geometry.height) < 3) return;
+
+    if (this.tool === 'frame') {
+      const objectId = newId();
+      const fill = null;
+      const pattern = 'none';
+      const stroke = '#94a3b8';
+      const strokeWidth = 2;
+      this.board.addObject({
+        id: objectId,
+        type: 'frame',
+        ...geometry,
+        fill,
+        pattern,
+        stroke,
+        strokeWidth,
+        rotation: 0,
+        author: this.getAuthor(),
+      });
+      this.onEvent({
+        type: 'frame_add',
+        objectId,
+        ...geometry,
+        fill,
+        pattern,
+        stroke,
+        strokeWidth,
+      });
+      return;
+    }
 
     if (this.tool === 'arrow' && this._connectorStart) {
       const targetId = this.board.objectIdAt(shape.end);

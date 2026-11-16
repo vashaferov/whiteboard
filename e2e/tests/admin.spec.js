@@ -27,6 +27,7 @@ test('admin: approves, promotes, blocks and resets passwords', async ({ browser,
   const adminRow = page.locator('.admin-user', { hasText: ADMIN_LOGIN });
   await expect(adminRow.locator('.admin-user__password')).toBeVisible();
 
+  await page.fill('#admin-search', login);
   const row = page.locator('.admin-user', { hasText: login });
   await expect(row.locator('.admin-user__status')).toHaveText('На рассмотрении');
 

@@ -24,6 +24,7 @@ let currentPermissions = null;
 let accessRoom = null;
 let selectedStudentIds = new Set();
 let searchTimer = null;
+let adminSearchTimer = null;
 
 export function initDashboard(options) {
   handlers = { ...handlers, ...options };
@@ -48,6 +49,7 @@ export function initDashboard(options) {
     tabRooms: $('#admin-tab-rooms'),
     refreshAdmin: $('#admin-refresh'),
     statusFilter: $('#admin-status-filter'),
+    adminSearch: $('#admin-search'),
     usersPanel: $('#admin-users-panel'),
     roomsPanel: $('#admin-rooms-panel'),
     adminUsers: $('#admin-users'),
@@ -66,6 +68,10 @@ export function initDashboard(options) {
   els.tabUsers.addEventListener('click', () => selectAdminTab('users'));
   els.tabRooms.addEventListener('click', () => selectAdminTab('rooms'));
   els.statusFilter.addEventListener('change', loadAdminUsers);
+  els.adminSearch.addEventListener('input', () => {
+    clearTimeout(adminSearchTimer);
+    adminSearchTimer = setTimeout(loadAdminUsers, 250);
+  });
   els.refreshAdmin.addEventListener('click', () => {
     if (els.tabRooms.classList.contains('is-active')) loadAdminRooms();
     else loadAdminUsers();
@@ -306,7 +312,10 @@ function handleAdminError(error) {
 async function loadAdminUsers() {
   if (!currentPermissions?.canManageAccounts) return;
   try {
-    const users = await adminApi.listUsers({ status: els.statusFilter.value });
+    const users = await adminApi.listUsers({
+      status: els.statusFilter.value,
+      q: els.adminSearch.value.trim(),
+    });
     renderAdminUsers(users);
     els.adminError.textContent = "";
   } catch (error) {
