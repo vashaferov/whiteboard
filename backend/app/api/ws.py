@@ -582,11 +582,11 @@ async def _handle_object_delete(
     user: ConnectedUser,
     message: ObjectDelete,
 ) -> None:
-    if not is_staff(user.role):
-        await manager.send_to(user, _error("forbidden", "Удалять объекты может только учитель"))
-        return
     obj = await _check_object_workspace(manager, room, user, message)
     if obj is None:
+        return
+    if not (is_staff(user.role) or obj.get("author") == user.id):
+        await manager.send_to(user, _error("forbidden", "Удалять можно только свои объекты"))
         return
     if manager.delete_object(room, message.objectId) is None:
         return

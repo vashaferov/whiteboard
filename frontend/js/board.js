@@ -28,6 +28,7 @@ export class Board {
     this.onObjectTransform = options.onObjectTransform ?? (() => {});
     this.onEditText = options.onEditText ?? (() => {});
     this.editPredicate = options.canEditObject ?? (() => false);
+    this.deletePredicate = options.canDeleteObject ?? this.editPredicate;
 
     this.scale = 1;
     this.offsetX = 0;
@@ -501,6 +502,113 @@ export class Board {
 
   getSelectedId() {
     return this.selectedId;
+  }
+
+  objectIdAt(point) {
+    const stagePoint = this.toScreen(point);
+    const target = this.stage.getIntersection(stagePoint);
+    let node = target;
+    while (node && node !== this.stage) {
+      if (node.id() && this.objects.has(node.id())) return node.id();
+      node = node.getParent();
+    }
+    return null;
+  }
+
+  eraseAt(point, radius) {
+    const ids = [];
+    for (const [id, entry] of [...this.objects.entries()]) {
+      if (!this.deletePredicate(entry.data)) continue;
+      if (this._isErased(entry, point, radius)) ids.push(id);
+    }
+    for (const id of ids) this.removeObject(id);
+    return ids;
+  }
+
+  _isErased(entry, point, radius) {
+    const data = entry.data;
+    if (entry.points) {
+      return (
+        this._distanceToSegments(entry.points, point) <=
+        radius + (data.width ?? 0) / 2
+      );
+    }
+    if (data.type === 'frame') {
+      return this._nearFrameBorder(data, point, radius);
+    }
+    if (data.type === 'connector') {
+      const points = entry.node?.points?.() ?? [];
+      if (points.length >= 4) {
+        const segments = [];
+        for (let index = 0; index + 3 < points.length; index += 2) {
+          segments.push([
+            [points[index], points[index + 1]],
+            [points[index + 2], points[index + 3]],
+          ]);
+        }
+        return this._segmentsDistance(segments, point) <= radius + 2;
+      }
+      return false;
+    }
+
+    const stagePoint = this.toScreen(point);
+    const rect = entry.node.getClientRect();
+    return this._circleIntersectsRect(stagePoint, radius * this.scale, rect);
+  }
+
+  _nearFrameBorder(data, point, radius) {
+    const left = Math.min(data.x, data.x + data.width);
+    const top = Math.min(data.y, data.y + data.height);
+    const right = Math.max(data.x, data.x + data.width);
+    const bottom = Math.max(data.y, data.y + data.height);
+    const dx = Math.max(left - point.x, 0, point.x - right);
+    const dy = Math.max(top - point.y, 0, point.y - bottom);
+    const outside = Math.hypot(dx, dy);
+    if (outside > radius) return false;
+    if (outside > 0) return true;
+    const inside = Math.min(
+      point.x - left,
+      right - point.x,
+      point.y - top,
+      bottom - point.y,
+    );
+    return inside <= radius + (data.strokeWidth ?? 2) / 2;
+  }
+
+  _circleIntersectsRect(point, radius, rect) {
+    const nearestX = Math.max(rect.x, Math.min(point.x, rect.x + rect.width));
+    const nearestY = Math.max(rect.y, Math.min(point.y, rect.y + rect.height));
+    return Math.hypot(point.x - nearestX, point.y - nearestY) <= radius;
+  }
+
+  _distanceToSegments(points, point) {
+    const segments = [];
+    for (let index = 0; index + 1 < points.length; index += 1) {
+      segments.push([points[index], points[index + 1]]);
+    }
+    return this._segmentsDistance(segments, point);
+  }
+
+  _segmentsDistance(segments, point) {
+    let best = Infinity;
+    for (const [start, end] of segments) {
+      const [x1, y1] = start;
+      const [x2, y2] = end;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const lengthSquared = dx * dx + dy * dy;
+      const t =
+        lengthSquared === 0
+          ? 0
+          : Math.max(
+              0,
+              Math.min(1, ((point.x - x1) * dx + (point.y - y1) * dy) / lengthSquared),
+            );
+      const x = x1 + t * dx;
+      const y = y1 + t * dy;
+      best = Math.min(best, Math.hypot(point.x - x, point.y - y));
+    }
+    return best;
   }
 
   _applyDraggable(entry) {

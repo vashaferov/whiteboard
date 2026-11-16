@@ -223,6 +223,11 @@ function startRoom({ room, user, permissions, board }) {
     canEditObject: (object) =>
       Boolean(state.user) &&
       (isStaff(state.user.role) || object.author === state.user.id),
+    canDeleteObject: (object) => {
+      if (!state.user) return false;
+      if (isStaff(state.user.role)) return true;
+      return object.author === state.user.id;
+    },
     onObjectMove: (objectId, x, y) => {
       sendWorkspace({
         type: 'object_update',
@@ -246,6 +251,9 @@ function startRoom({ room, user, permissions, board }) {
     onEvent: (message) => sendWorkspace(message),
     onCreateText: (point) => openTextEditor(point),
     getAuthor: () => state.user?.id ?? null,
+    onErase: (ids) => {
+      for (const id of ids) sendWorkspace({ type: 'object_delete', objectId: id });
+    },
   });
 
   pagesPanel = new PagesPanel({

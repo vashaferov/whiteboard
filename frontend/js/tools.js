@@ -3,8 +3,9 @@
  * Локальный оптимистичный рендеринг + отправка событий через onEvent.
  */
 
-const STROKE_TOOLS = new Set(['brush', 'eraser']);
+const STROKE_TOOLS = new Set(['brush']);
 const SHAPE_TOOLS = new Set(['rect', 'circle', 'line', 'arrow']);
+const ERASER_RADIUS_MIN = 10;
 const POINT_THROTTLE_MS = 16;
 
 function newId() {
@@ -30,12 +31,14 @@ function normalizeShape(tool, start, end) {
 }
 
 export class ToolManager {
-  constructor({ board, onEvent, onCreateText, getAuthor }) {
+  constructor({ board, onEvent, onCreateText, getAuthor, onErase }) {
     this.board = board;
     this.stage = board.stage;
     this.onEvent = onEvent;
     this.onCreateText = onCreateText;
     this.getAuthor = getAuthor ?? (() => null);
+    this.onErase = onErase ?? (() => {});
+    this.erasing = false;
 
     this.tool = 'brush';
     this.color = '#2563eb';
@@ -76,7 +79,7 @@ export class ToolManager {
   }
 
   isDrawing() {
-    return Boolean(this.stroke || this.shape);
+    return Boolean(this.stroke || this.shape || this.erasing);
   }
 
   _handleDown(event) {
@@ -89,7 +92,10 @@ export class ToolManager {
     const point = this.board.getPointer();
     if (!point) return;
 
-    if (STROKE_TOOLS.has(this.tool)) {
+    if (this.tool === 'eraser') {
+      this.erasing = true;
+      this._erase(point);
+    } else if (STROKE_TOOLS.has(this.tool)) {
       this._startStroke(point);
     } else if (SHAPE_TOOLS.has(this.tool)) {
       this.shape = { start: point, end: point };
@@ -100,6 +106,12 @@ export class ToolManager {
   }
 
   _handleMove() {
+    if (this.erasing) {
+      const point = this.board.getPointer();
+      if (point) this._erase(point);
+      return;
+    }
+
     if (this.stroke) {
       const point = this.board.getPointer();
       if (!point) return;
@@ -124,12 +136,19 @@ export class ToolManager {
   }
 
   _handleUp() {
+    this.erasing = false;
     if (this.stroke) {
       this._finishStroke();
     }
     if (this.shape) {
       this._finishShape();
     }
+  }
+
+  _erase(point) {
+    const radius = Math.max(ERASER_RADIUS_MIN, this.width * 1.5);
+    const ids = this.board.eraseAt(point, radius);
+    if (ids.length) this.onErase(ids);
   }
 
   // Commit whatever is in progress before the student's page changes.
