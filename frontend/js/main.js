@@ -245,6 +245,7 @@ function startRoom({ room, user, permissions, board }) {
     board: state.board,
     onEvent: (message) => sendWorkspace(message),
     onCreateText: (point) => openTextEditor(point),
+    getAuthor: () => state.user?.id ?? null,
   });
 
   pagesPanel = new PagesPanel({
@@ -448,7 +449,10 @@ async function uploadImage(event) {
       y,
       width,
       height,
+      author: state.user?.id ?? null,
     });
+    state.board.selectObject(objectId);
+    selectTool('select');
     sendWorkspace({
       type: 'image_add',
       objectId,
@@ -566,6 +570,7 @@ function commitText() {
     color: style.color,
     fontSize: style.fontSize,
     rotation: 0,
+    author: state.user?.id ?? null,
   };
   state.board.addObject(object);
   sendWorkspace({

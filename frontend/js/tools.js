@@ -30,11 +30,12 @@ function normalizeShape(tool, start, end) {
 }
 
 export class ToolManager {
-  constructor({ board, onEvent, onCreateText }) {
+  constructor({ board, onEvent, onCreateText, getAuthor }) {
     this.board = board;
     this.stage = board.stage;
     this.onEvent = onEvent;
     this.onCreateText = onCreateText;
+    this.getAuthor = getAuthor ?? (() => null);
 
     this.tool = 'brush';
     this.color = '#2563eb';
@@ -158,6 +159,7 @@ export class ToolManager {
       color: this.color,
       width: this.width,
       points: [[point.x, point.y]],
+      author: this.getAuthor(),
     });
     this.onEvent({
       type: 'stroke_start',
@@ -236,6 +238,7 @@ export class ToolManager {
       color: this.color,
       strokeWidth: this.width,
       fill: null,
+      author: this.getAuthor(),
     };
     this.board.addObject(object);
     this.onEvent({
