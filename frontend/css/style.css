@@ -580,6 +580,26 @@ textarea {
   list-style: none;
 }
 
+.users-panel__pull {
+  display: flex;
+  gap: 6px;
+}
+
+.users-panel__pull .btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.user__pull-check {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .user {
   display: flex;
   align-items: center;

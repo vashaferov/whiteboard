@@ -49,6 +49,8 @@ const state = {
   pendingWorkspaceId: null,
   pendingEvents: [],
   stateVersion: 0,
+  selectedStudentIds: new Set(),
+  moveRequestId: null,
 };
 
 const els = {};
@@ -124,6 +126,9 @@ function cacheElements() {
   els.roomLabel = $('#room-label');
   els.userList = $('#user-list');
   els.userCount = $('#user-count');
+  els.pullActions = $('#pull-actions');
+  els.pullSelected = $('#pull-selected');
+  els.pullAll = $('#pull-all');
   els.usersHint = $('#users-hint');
   els.toolButtons = Array.from(document.querySelectorAll('[data-tool]'));
   els.colors = $('#colors');
@@ -215,6 +220,8 @@ function startSession(session) {
   state.pendingWorkspaceId = null;
   state.pendingEvents = [];
   state.stateVersion = 0;
+  state.selectedStudentIds = new Set();
+  state.moveRequestId = null;
 
   els.login.hidden = true;
   els.app.hidden = false;
@@ -300,6 +307,8 @@ function leaveLesson(message = '') {
   state.pendingWorkspaceId = null;
   state.pendingEvents = [];
   state.stateVersion = 0;
+  state.selectedStudentIds = new Set();
+  state.moveRequestId = null;
   pagesPanel = null;
   els.pagesPanel.replaceChildren();
 
@@ -335,6 +344,16 @@ function bindToolbar() {
   els.imageBtn.addEventListener('click', () => els.fileInput.click());
   els.fileInput.addEventListener('change', uploadImage);
   els.leaveBtn.addEventListener('click', () => leaveLesson('Вы вышли из урока'));
+
+  els.pullSelected.addEventListener('click', () => {
+    if (!state.selectedStudentIds.size) return;
+    state.sync?.send({ type: 'workspace_pull', clientIds: [...state.selectedStudentIds] });
+    state.selectedStudentIds.clear();
+    renderUsers();
+  });
+  els.pullAll.addEventListener('click', () => {
+    state.sync?.send({ type: 'workspace_pull', all: true });
+  });
 }
 
 function buildPalette() {
@@ -574,7 +593,7 @@ function canManageWorkspaces() {
 function renderPages() {
   pagesPanel?.render(state.workspaces, state.workspaceId, {
     canManage: canManageWorkspaces(),
-    busy: Boolean(state.pendingWorkspaceId),
+    busy: Boolean(state.pendingWorkspaceId || state.moveRequestId),
   });
 }
 
@@ -607,7 +626,7 @@ function nextPageName() {
 }
 
 function requestWorkspaceSwitch(id) {
-  if (!id || state.pendingWorkspaceId || id === state.workspaceId) return;
+  if (!id || state.pendingWorkspaceId || state.moveRequestId || id === state.workspaceId) return;
   commitText();
   state.board.setInteractive(false);
   state.pendingWorkspaceId = id;
@@ -698,6 +717,12 @@ function handleServerEvent(message) {
     case 'workspace_deleted':
       handleWorkspaceDeleted(message);
       break;
+    case 'workspace_prepare_move':
+      handlePrepareMove(message);
+      break;
+    case 'workspace_moved':
+      handleWorkspaceMoved(message);
+      break;
     case 'error':
       abortPendingWorkspaceSwitch();
       toast(message.message || 'Ошибка');
@@ -774,6 +799,8 @@ function handleWorkspaceState(message) {
   state.stateVersion = version;
   state.workspaceId = message.workspaceId;
   state.pendingWorkspaceId = null;
+  state.moveRequestId = null;
+  state.ready = true;
 
   state.board.setObjects(message.objects || []);
   state.board.clearCursors();
@@ -785,7 +812,36 @@ function handleWorkspaceState(message) {
   for (const event of buffered) applyObjectEvent(event);
 
   renderPages();
+  renderUsers();
   persistSessionWorkspace();
+}
+
+function handlePrepareMove(message) {
+  if (!message.requestId) return;
+  state.moveRequestId = message.requestId;
+  // Save the text draft and finish a stroke before acking, so both land on the
+  // page the student is leaving (the server waits for this ack).
+  commitText();
+  state.tools?.finishActiveStroke();
+  state.sync?.send({ type: 'workspace_move_ack', requestId: message.requestId });
+  renderPages();
+  // Safety net: the server applies a move no later than its 2 s timeout; if the
+  // target vanished meanwhile, no workspace_state arrives and this unfreezes UI.
+  window.setTimeout(() => {
+    if (state.moveRequestId !== message.requestId) return;
+    state.moveRequestId = null;
+    renderPages();
+  }, 3000);
+}
+
+function handleWorkspaceMoved(message) {
+  state.moveRequestId = null;
+  state.ready = false;
+  state.pendingWorkspaceId = message.workspaceId || null;
+  state.pendingEvents = [];
+  state.board?.setInteractive(false);
+  renderPages();
+  if (message.name) toast(`Учитель перенёс вас на страницу «${message.name}»`);
 }
 
 function handleWorkspaceCreated(message) {
@@ -838,6 +894,8 @@ function handleInit(message) {
   state.pendingWorkspaceId = null;
   state.pendingEvents = [];
   state.stateVersion = 0;
+  state.moveRequestId = null;
+  state.selectedStudentIds = new Set();
   if (state.sync) state.sync.workspaceId = state.workspaceId ?? '';
 
   state.board.setBoardSize(message.board.width, message.board.height);
@@ -888,12 +946,34 @@ function renderUsers() {
     return left.name.localeCompare(right.name, 'ru');
   });
 
+  const canPull = canPullStudents();
+  const students = new Set(
+    users.filter((user) => user.role === 'student').map((user) => user.id),
+  );
+  for (const id of [...state.selectedStudentIds]) {
+    if (!students.has(id)) state.selectedStudentIds.delete(id);
+  }
+
   els.userList.replaceChildren();
   els.userCount.textContent = users.length ? `(${users.length})` : '';
 
   for (const user of users) {
     const item = document.createElement('li');
     item.className = 'user';
+
+    if (canPull && user.role === 'student') {
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.className = 'user__pull-check';
+      check.title = `Выбрать ${user.name}`;
+      check.checked = state.selectedStudentIds.has(user.id);
+      check.addEventListener('change', () => {
+        if (check.checked) state.selectedStudentIds.add(user.id);
+        else state.selectedStudentIds.delete(user.id);
+        updatePullActions();
+      });
+      item.appendChild(check);
+    }
 
     const dot = document.createElement('span');
     dot.className = 'user__dot';
@@ -932,6 +1012,20 @@ function renderUsers() {
 
     els.userList.appendChild(item);
   }
+
+  updatePullActions();
+}
+
+function canPullStudents() {
+  return Boolean(state.permissions.canManageUsers) && state.user?.role === 'teacher';
+}
+
+function updatePullActions() {
+  if (!els.pullActions) return;
+  const canPull = canPullStudents();
+  els.pullActions.hidden = !canPull;
+  els.pullSelected.disabled = state.selectedStudentIds.size === 0;
+  els.pullAll.disabled = !canPull;
 }
 
 // ------------------------------------------------------------------ cursors

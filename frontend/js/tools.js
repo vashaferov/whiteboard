@@ -131,6 +131,12 @@ export class ToolManager {
     }
   }
 
+  // Commit whatever is in progress before the student's page changes.
+  finishActiveStroke() {
+    this._finishStroke();
+    this._cancelShape();
+  }
+
   // ------------------------------------------------------------------ strokes
 
   _startStroke(point) {

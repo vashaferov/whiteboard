@@ -212,6 +212,21 @@ export async function deletePage(page, name) {
   await page.locator('#pages-panel .page', { hasText: name }).locator('.page__delete').click();
 }
 
+export async function selectStudent(page, name) {
+  await page
+    .locator('#user-list .user', { hasText: name })
+    .locator('.user__pull-check')
+    .check();
+}
+
+export async function pullSelected(page) {
+  await page.click('#pull-selected');
+}
+
+export async function pullAll(page) {
+  await page.click('#pull-all');
+}
+
 export async function movePage(page, name, direction) {
   const selector = direction === 'up' ? '.page__up' : '.page__down';
   await page.locator('#pages-panel .page', { hasText: name }).locator(selector).click();
