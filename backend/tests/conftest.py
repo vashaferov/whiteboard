@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import urllib.parse
 from pathlib import Path
@@ -15,6 +16,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from app.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
+from tests.support import ADMIN_LOGIN, ADMIN_PASSWORD, login_session  # noqa: E402
 
 TEACHER_CODE = "secret-code"
 
@@ -24,6 +26,12 @@ def settings(tmp_path: Path) -> Settings:
     return Settings(
         jwt_secret="test-secret-0123456789abcdef0123456789",
         teacher_code=TEACHER_CODE,
+        admin_login=ADMIN_LOGIN,
+        admin_password=ADMIN_PASSWORD,
+        admin_name="Администратор",
+        password_rounds=4,
+        session_ttl_hours=12,
+        cookie_secure=False,
         data_dir=tmp_path / "data",
         uploads_dir=tmp_path / "uploads",
         frontend_dir=tmp_path / "frontend",
@@ -40,6 +48,26 @@ def app(settings: Settings):
 def client(app):
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def admin_session(client: TestClient) -> str:
+    return login_session(client, ADMIN_LOGIN, ADMIN_PASSWORD)
+
+
+@pytest.fixture
+def activate_user(client: TestClient):
+    def _activate(login: str, *, role: str | None = None) -> str:
+        store = client.app.state.accounts
+        user = asyncio.run(store.get_user_by_login(login))
+        assert user is not None, f"user {login} is not registered"
+        updates = {"status": "active"}
+        if role is not None:
+            updates["role"] = role
+        asyncio.run(store.update_user(user.id, **updates))
+        return user.id
+
+    return _activate
 
 
 @pytest.fixture

@@ -13,9 +13,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, upload, ws
+from app.api import accounts, upload, ws
 from app.config import Settings, get_settings
 from app.services import metrics
+from app.services.accounts import AccountStore
+from app.services.auth import WindowLimiter, hash_password
 from app.services.images import build_image_storage
 from app.services.logging import configure_logging, init_sentry, request_id_var
 from app.services.room_manager import RoomManager
@@ -36,14 +38,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         store = SnapshotStore(settings.data_dir / "whiteboard.db")
+        accounts = AccountStore(settings.data_dir / "whiteboard.db")
         images = build_image_storage(settings)
         await images.startup()
         manager = RoomManager(settings, store, images)
         await manager.startup()
+        if accounts.legacy_wiped and settings.redis_enabled:
+            await manager.purge_room_keys()
+        created = await accounts.ensure_admin(
+            login=settings.admin_login,
+            name=settings.admin_name,
+            password_hash=hash_password(settings.admin_password, settings.password_rounds),
+        )
+        if created is not None:
+            logger.info("Bootstrap admin %s created", created.login)
+        if settings.admin_password == "admin-change-me":
+            logger.warning("Bootstrap admin password is the default; change it in the UI")
+        await accounts.prune_sessions()
         app.state.settings = settings
         app.state.store = store
+        app.state.accounts = accounts
         app.state.images = images
         app.state.manager = manager
+        app.state.login_limiter = WindowLimiter(10, 60)
+        app.state.register_limiter = WindowLimiter(5, 60)
         logger.info(
             "Whiteboard started (board %sx%s, data=%s, redis=%s, s3=%s)",
             settings.board_width,
@@ -56,6 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             await manager.shutdown()
+            await accounts.close()
             await store.close()
             await images.close()
             logger.info("Whiteboard stopped")
@@ -104,7 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.include_router(auth.router)
+    app.include_router(accounts.router)
     app.include_router(upload.router)
     app.include_router(ws.router)
 

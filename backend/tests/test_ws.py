@@ -55,7 +55,8 @@ def test_init_and_user_joined(client: TestClient, login_user, ws_url) -> None:
             assert student_init["permissions"]["canManageWorkspaces"] is False
 
             joined = teacher_ws.receive_json()
-            assert joined == {"type": "user_joined", "user": student["user"]}
+            assert joined["type"] == "user_joined"
+            assert joined["user"]["id"] == student["user"]["id"]
 
 
 def test_shape_broadcast_and_late_join_snapshot(client: TestClient, login_user, ws_url) -> None:

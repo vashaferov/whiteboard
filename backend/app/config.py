@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     jwt_ttl_hours: int = 12
     teacher_code: str = "teacher"
 
+    admin_login: str = "admin"
+    admin_password: str = "admin-change-me"
+    admin_name: str = "Администратор"
+    session_ttl_hours: int = 12
+    cookie_secure: bool = False
+    password_rounds: int = 12
+
     board_width: int = 1600
     board_height: int = 900
 

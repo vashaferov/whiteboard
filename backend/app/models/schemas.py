@@ -33,8 +33,9 @@ class BoardSize(BaseModel):
 class UserInfo(BaseModel):
     id: str
     name: str
-    role: Literal["teacher", "student"]
+    role: Literal["teacher", "student", "admin"]
     color: str
+    login: str = ""
 
 
 class Permissions(BaseModel):
@@ -43,6 +44,44 @@ class Permissions(BaseModel):
     canDelete: bool
     canManageUsers: bool
     canManageWorkspaces: bool
+    canCreateRooms: bool
+    canManageAccounts: bool
+
+
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    login: str = Field(pattern=r"^[A-Za-z0-9_.-]{3,32}$")
+    name: str = Field(min_length=1, max_length=40)
+    password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("Имя не может быть пустым")
+        return cleaned
+
+    @field_validator("password")
+    @classmethod
+    def _password_bytes(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Пароль не длиннее 72 байт")
+        return value
+
+
+class Credentials(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    login: str = Field(min_length=1, max_length=32)
+    password: str = Field(min_length=1, max_length=72)
+
+
+class AuthResponse(BaseModel):
+    user: UserInfo
+    permissions: Permissions
+    board: BoardSize
 
 
 class LoginRequest(BaseModel):
@@ -283,11 +322,13 @@ client_message_adapter: TypeAdapter[ClientMessage] = TypeAdapter(ClientMessage)
 
 
 def permissions_for(role: str) -> Permissions:
-    is_teacher = role == "teacher"
+    is_staff = role in ("teacher", "admin")
     return Permissions(
         canDraw=True,
-        canClear=is_teacher,
-        canDelete=is_teacher,
-        canManageUsers=is_teacher,
-        canManageWorkspaces=is_teacher,
+        canClear=is_staff,
+        canDelete=is_staff,
+        canManageUsers=is_staff,
+        canManageWorkspaces=is_staff,
+        canCreateRooms=is_staff,
+        canManageAccounts=role == "admin",
     )
