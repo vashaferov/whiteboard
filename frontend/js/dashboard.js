@@ -1,6 +1,6 @@
 /** Дашборд: комнаты ученика/учителя и админская панель. */
 
-import { roomsApi, usersApi } from './api.js';
+import { adminApi, roomsApi, usersApi } from './api.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -10,8 +10,15 @@ const ROLE_LABELS = {
   admin: 'Администратор',
 };
 
+const STATUS_LABELS = {
+  pending: 'На рассмотрении',
+  active: 'Активен',
+  blocked: 'Заблокирован',
+  rejected: 'Отклонён',
+};
+
 let els = null;
-let handlers = { onOpenRoom: () => {}, onLogout: () => {} };
+let handlers = { onOpenRoom: () => {}, onLogout: () => {}, onSessionLost: () => {} };
 let currentUser = null;
 let currentPermissions = null;
 let accessRoom = null;
@@ -37,6 +44,15 @@ export function initDashboard(options) {
     accessError: $('#access-error'),
     accessSave: $('#access-save'),
     accessCancel: $('#access-cancel'),
+    tabUsers: $('#admin-tab-users'),
+    tabRooms: $('#admin-tab-rooms'),
+    refreshAdmin: $('#admin-refresh'),
+    statusFilter: $('#admin-status-filter'),
+    usersPanel: $('#admin-users-panel'),
+    roomsPanel: $('#admin-rooms-panel'),
+    adminUsers: $('#admin-users'),
+    adminRooms: $('#admin-rooms'),
+    adminError: $('#admin-error'),
   };
 
   els.logout.addEventListener('click', () => handlers.onLogout());
@@ -46,6 +62,13 @@ export function initDashboard(options) {
   els.accessSearch.addEventListener('input', () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(searchStudents, 250);
+  });
+  els.tabUsers.addEventListener('click', () => selectAdminTab('users'));
+  els.tabRooms.addEventListener('click', () => selectAdminTab('rooms'));
+  els.statusFilter.addEventListener('change', loadAdminUsers);
+  els.refreshAdmin.addEventListener('click', () => {
+    if (els.tabRooms.classList.contains('is-active')) loadAdminRooms();
+    else loadAdminUsers();
   });
   window.addEventListener('focus', () => {
     if (!els.root.hidden) loadRooms();
@@ -65,6 +88,9 @@ export function showDashboard({ user, permissions }) {
   els.admin.hidden = !permissions.canManageAccounts;
   showError('');
   loadRooms();
+  if (permissions.canManageAccounts) {
+    selectAdminTab('users');
+  }
 }
 
 function showError(message) {
@@ -247,5 +273,166 @@ async function saveAccess() {
     els.accessError.textContent = error.message || 'Не удалось сохранить доступ';
   } finally {
     els.accessSave.disabled = false;
+  }
+}
+
+/* ------------------------------------------------------------- admin panel */
+
+function selectAdminTab(tab) {
+  const usersActive = tab === "users";
+  els.tabUsers.classList.toggle("is-active", usersActive);
+  els.tabRooms.classList.toggle("is-active", !usersActive);
+  els.usersPanel.hidden = !usersActive;
+  els.roomsPanel.hidden = usersActive;
+  if (usersActive) loadAdminUsers();
+  else loadAdminRooms();
+}
+
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function handleAdminError(error) {
+  if (error.status === 401) {
+    handlers.onSessionLost();
+    return;
+  }
+  els.adminError.textContent = error.message || "Не удалось выполнить действие";
+}
+
+async function loadAdminUsers() {
+  if (!currentPermissions?.canManageAccounts) return;
+  try {
+    const users = await adminApi.listUsers({ status: els.statusFilter.value });
+    renderAdminUsers(users);
+    els.adminError.textContent = "";
+  } catch (error) {
+    handleAdminError(error);
+  }
+}
+
+function renderAdminUsers(users) {
+  els.adminUsers.replaceChildren();
+  if (!users.length) {
+    els.adminUsers.appendChild(element("li", "admin-list__empty", "Пользователей нет"));
+    return;
+  }
+
+  for (const user of users) {
+    const item = element("li", "admin-user");
+    item.append(
+      element("span", "admin-user__login", user.login),
+      element("span", "admin-user__name", user.name),
+      element("span", "admin-user__status", STATUS_LABELS[user.status] || user.status),
+    );
+
+    if (user.role === "admin") {
+      item.appendChild(element("span", "badge", "администратор"));
+    } else {
+      const role = document.createElement("select");
+      role.className = "admin-user__role";
+      for (const value of ["student", "teacher"]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = ROLE_LABELS[value];
+        role.appendChild(option);
+      }
+      role.value = user.role;
+      role.addEventListener("change", () => patchUser(user, { role: role.value }));
+      item.appendChild(role);
+    }
+
+    const actions = element("div", "admin-user__actions");
+    if (user.status === "pending") {
+      actions.appendChild(
+        button("Подтвердить", "admin-user__approve", () => patchUser(user, { status: "active" })),
+      );
+      actions.appendChild(
+        button("Отклонить", "admin-user__reject", () => patchUser(user, { status: "rejected" })),
+      );
+    }
+    if (user.role !== "admin") {
+      const blocked = user.status === "blocked";
+      actions.appendChild(
+        button(
+          blocked ? "Разблокировать" : "Заблокировать",
+          "admin-user__block",
+          () => patchUser(user, { status: blocked ? "active" : "blocked" }),
+        ),
+      );
+      actions.appendChild(
+        button("Пароль", "admin-user__password", () => resetPassword(user)),
+      );
+    }
+    item.appendChild(actions);
+    els.adminUsers.appendChild(item);
+  }
+}
+
+async function patchUser(user, patch) {
+  try {
+    await adminApi.updateUser(user.id, patch);
+    els.adminError.textContent = "";
+    await loadAdminUsers();
+  } catch (error) {
+    handleAdminError(error);
+  }
+}
+
+async function resetPassword(user) {
+  const password = window.prompt(`Новый пароль для ${user.login} (не короче 8 символов)`);
+  if (password === null || !password) return;
+  try {
+    await adminApi.resetPassword(user.id, password);
+    els.adminError.textContent = "";
+    await loadAdminUsers();
+  } catch (error) {
+    handleAdminError(error);
+  }
+}
+
+async function loadAdminRooms() {
+  if (!currentPermissions?.canManageAccounts) return;
+  try {
+    const rooms = await roomsApi.all();
+    renderAdminRooms(rooms);
+    els.adminError.textContent = "";
+  } catch (error) {
+    handleAdminError(error);
+  }
+}
+
+function renderAdminRooms(rooms) {
+  els.adminRooms.replaceChildren();
+  if (!rooms.length) {
+    els.adminRooms.appendChild(element("li", "admin-list__empty", "Комнат нет"));
+    return;
+  }
+
+  for (const room of rooms) {
+    const item = element("li", "admin-room");
+    item.append(
+      element("span", "admin-room__name", room.name),
+      element("span", "admin-room__owner", `Учитель: ${room.owner.name}`),
+    );
+    const actions = element("div", "admin-room__actions");
+    actions.appendChild(button("Открыть", "admin-room__open", () => handlers.onOpenRoom(room.id)));
+    actions.appendChild(
+      button("Удалить", "admin-room__delete", async () => {
+        if (!window.confirm(`Удалить комнату «${room.name}»?`)) return;
+        try {
+          await roomsApi.remove(room.id);
+          await loadAdminRooms();
+          await loadRooms();
+        } catch (error) {
+          handleAdminError(error);
+        }
+      }),
+    );
+    item.appendChild(actions);
+    els.adminRooms.appendChild(item);
   }
 }

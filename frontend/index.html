@@ -106,7 +106,40 @@
           <p id="dash-error" class="login__error" role="alert"></p>
         </section>
 
-        <section id="dash-admin" class="dashboard__section dashboard__section--admin" hidden></section>
+        <section id="dash-admin" class="dashboard__section dashboard__section--admin" hidden>
+          <div class="dashboard__toolbar">
+            <h2 class="dashboard__title">Администрирование</h2>
+            <div class="admin-tabs">
+              <button id="admin-tab-users" class="auth__tab is-active" type="button">
+                Пользователи
+              </button>
+              <button id="admin-tab-rooms" class="auth__tab" type="button">Комнаты</button>
+              <button id="admin-refresh" class="btn btn--ghost btn--small" type="button">
+                Обновить
+              </button>
+            </div>
+          </div>
+
+          <div id="admin-users-panel">
+            <label class="field field--inline">
+              <span>Статус</span>
+              <select id="admin-status-filter">
+                <option value="">Все</option>
+                <option value="pending">Заявки</option>
+                <option value="active">Активные</option>
+                <option value="blocked">Заблокированные</option>
+                <option value="rejected">Отклонённые</option>
+              </select>
+            </label>
+            <ul id="admin-users" class="admin-list"></ul>
+          </div>
+
+          <div id="admin-rooms-panel" hidden>
+            <ul id="admin-rooms" class="admin-list"></ul>
+          </div>
+
+          <p id="admin-error" class="login__error" role="alert"></p>
+        </section>
       </main>
 
       <dialog id="access-dialog" class="access-dialog">

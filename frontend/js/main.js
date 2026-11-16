@@ -105,6 +105,7 @@ function init() {
       window.location.href = `/?room=${encodeURIComponent(roomId)}`;
     },
     onLogout: logout,
+    onSessionLost: () => showAuth('Сессия истекла — войдите снова'),
   });
   boot();
 }
