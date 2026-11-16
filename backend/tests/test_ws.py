@@ -534,11 +534,12 @@ def test_transform_and_text_edit_restore_after_room_closure(
 def test_websocket_requires_valid_token(client: TestClient, login_user, ws_url) -> None:
     student = login_user("Ученик", "student")
 
-    with pytest.raises(WebSocketDisconnect), client.websocket_connect("/ws/room-1?token=garbage"):
-        pass
+    with client.websocket_connect("/ws/room-1?token=garbage") as ws:
+        with pytest.raises(WebSocketDisconnect) as invalid:
+            ws.receive_json()
+        assert invalid.value.code == 4401
 
-    with (
-        pytest.raises(WebSocketDisconnect),
-        client.websocket_connect(ws_url(student["token"], room="room-2")),
-    ):
-        pass
+    with client.websocket_connect(ws_url(student["token"], room="room-2")) as ws:
+        with pytest.raises(WebSocketDisconnect) as mismatch:
+            ws.receive_json()
+        assert mismatch.value.code == 4403

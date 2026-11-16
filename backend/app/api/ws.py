@@ -38,7 +38,9 @@ from app.models.schemas import (
     permissions_for,
 )
 from app.services import metrics
-from app.services.auth import TokenError, decode_token
+from app.services.access import can_access_room
+from app.services.accounts import AccountStore
+from app.services.auth import SESSION_COOKIE, TokenError, decode_token, is_staff
 from app.services.room_manager import ConnectedUser, RateLimiter, Room, RoomManager
 
 logger = logging.getLogger(__name__)
@@ -77,7 +79,7 @@ def _new_object(
 
 
 def _can_edit_object(user: ConnectedUser, obj: dict[str, Any]) -> bool:
-    return user.role == "teacher" or obj.get("author") == user.id
+    return is_staff(user.role) or obj.get("author") == user.id
 
 
 async def _check_workspace(manager: RoomManager, user: ConnectedUser, message: Any) -> bool:
@@ -112,40 +114,28 @@ async def websocket_endpoint(
 ) -> None:
     settings: Settings = websocket.app.state.settings
     manager: RoomManager = websocket.app.state.manager
+    accounts: AccountStore = websocket.app.state.accounts
 
-    if not re.fullmatch(ROOM_ID_PATTERN, room_id):
-        await websocket.close(code=4400, reason="invalid_room")
-        return
-
-    try:
-        payload = decode_token(settings, token)
-    except TokenError:
-        await websocket.close(code=4401, reason="unauthorized")
-        return
-
-    if payload.room_id != room_id:
-        await websocket.close(code=4403, reason="room_mismatch")
-        return
-
+    # Accept first so close codes reach browsers (a pre-accept close is an HTTP 403).
     await websocket.accept()
     metrics.WS_CONNECTIONS.inc()
-
-    user = ConnectedUser(
-        id=payload.user_id,
-        name=payload.name,
-        role=payload.role,
-        color=payload.color,
-        websocket=websocket,
-        limiter=_limiter(settings),
-    )
-    room = await manager.join(room_id, user)
-    if workspace and room.get_workspace(workspace) is not None:
-        user.workspace_id = workspace
-    else:
-        user.workspace_id = room.workspace_ids()[0]
-    users = await manager.list_users(room)
-
+    user: ConnectedUser | None = None
     try:
+        if not re.fullmatch(ROOM_ID_PATTERN, room_id):
+            await websocket.close(code=4400, reason="invalid_room")
+            return
+
+        user = await _authenticate(websocket, accounts, settings, room_id, token)
+        if user is None:
+            return
+
+        room = await manager.join(room_id, user)
+        if workspace and room.get_workspace(workspace) is not None:
+            user.workspace_id = workspace
+        else:
+            user.workspace_id = room.workspace_ids()[0]
+        users = await manager.list_users(room)
+
         await websocket.send_json(
             {
                 "type": "init",
@@ -170,10 +160,65 @@ async def websocket_endpoint(
     except WebSocketDisconnect:
         pass
     except Exception:  # noqa: BLE001 - keep the server alive on malformed clients
-        logger.exception("WebSocket failure in room %s for user %s", room_id, user.id)
+        logger.exception(
+            "WebSocket failure in room %s for user %s",
+            room_id,
+            user.id if user is not None else "?",
+        )
     finally:
-        await manager.leave(room_id, user.id)
+        if user is not None:
+            await manager.leave(room_id, user.id)
         metrics.WS_CONNECTIONS.dec()
+
+
+async def _authenticate(
+    websocket: WebSocket,
+    accounts: AccountStore,
+    settings: Settings,
+    room_id: str,
+    token: str,
+) -> ConnectedUser | None:
+    """Resolve the socket owner from the session cookie, falling back to a JWT."""
+    session_id = websocket.cookies.get(SESSION_COOKIE)
+    if session_id:
+        account = await accounts.get_session_user(session_id)
+        if account is None or account.status != "active":
+            await websocket.close(code=4401, reason="unauthorized")
+            return None
+        room = await accounts.get_room(room_id)
+        if room is None:
+            await websocket.close(code=4404, reason="room_not_found")
+            return None
+        granted = await accounts.has_room_access(room_id, account.id)
+        if not can_access_room(account, room, granted=granted):
+            await websocket.close(code=4403, reason="forbidden")
+            return None
+        return ConnectedUser(
+            id=account.id,
+            name=account.name,
+            role=account.role,
+            color=account.color,
+            websocket=websocket,
+            limiter=_limiter(settings),
+        )
+
+    # legacy до Task 7: токен из query-строки.
+    try:
+        payload = decode_token(settings, token)
+    except TokenError:
+        await websocket.close(code=4401, reason="unauthorized")
+        return None
+    if payload.room_id != room_id:
+        await websocket.close(code=4403, reason="room_mismatch")
+        return None
+    return ConnectedUser(
+        id=payload.user_id,
+        name=payload.name,
+        role=payload.role,
+        color=payload.color,
+        websocket=websocket,
+        limiter=_limiter(settings),
+    )
 
 
 async def _receive_loop(
@@ -558,7 +603,7 @@ async def _handle_object_delete(
     user: ConnectedUser,
     message: ObjectDelete,
 ) -> None:
-    if user.role != "teacher":
+    if not is_staff(user.role):
         await manager.send_to(user, _error("forbidden", "Удалять объекты может только учитель"))
         return
     obj = await _check_object_workspace(manager, room, user, message)
@@ -609,7 +654,7 @@ async def _handle_clear(
     user: ConnectedUser,
     message: Clear,
 ) -> None:
-    if user.role != "teacher":
+    if not is_staff(user.role):
         await manager.send_to(user, _error("forbidden", "Очистить доску может только учитель"))
         return
     if not await _check_workspace(manager, user, message):
@@ -629,7 +674,7 @@ async def _handle_kick(
     user: ConnectedUser,
     message: Kick,
 ) -> None:
-    if user.role != "teacher":
+    if not is_staff(user.role):
         await manager.send_to(
             user, _error("forbidden", "Отключать участников может только учитель")
         )
@@ -657,7 +702,7 @@ async def _handle_workspace_create(
     message: WorkspaceCreate,
     settings: Settings,
 ) -> None:
-    if user.role != "teacher":
+    if not is_staff(user.role):
         await manager.send_to(user, _error("forbidden", "Создавать страницы может только учитель"))
         return
     if len(room.workspaces) >= settings.max_workspaces_per_room:
@@ -674,7 +719,7 @@ async def _handle_workspace_rename(
     user: ConnectedUser,
     message: WorkspaceRename,
 ) -> None:
-    if user.role != "teacher":
+    if not is_staff(user.role):
         await manager.send_to(
             user, _error("forbidden", "Переименовывать страницы может только учитель")
         )
@@ -698,7 +743,7 @@ async def _handle_workspace_delete(
     user: ConnectedUser,
     message: WorkspaceDelete,
 ) -> None:
-    if user.role != "teacher":
+    if not is_staff(user.role):
         await manager.send_to(user, _error("forbidden", "Удалять страницы может только учитель"))
         return
     if room.get_workspace(message.workspaceId) is None:
@@ -721,7 +766,7 @@ async def _handle_workspace_reorder(
     user: ConnectedUser,
     message: WorkspaceReorder,
 ) -> None:
-    if user.role != "teacher":
+    if not is_staff(user.role):
         await manager.send_to(
             user, _error("forbidden", "Менять порядок страниц может только учитель")
         )
@@ -741,7 +786,7 @@ async def _handle_workspace_pull(
     user: ConnectedUser,
     message: WorkspacePull,
 ) -> None:
-    if user.role != "teacher":
+    if not is_staff(user.role):
         await manager.send_to(
             user, _error("forbidden", "Перемещать участников может только учитель")
         )
