@@ -34,6 +34,12 @@ def drain_until(websocket, type_name: str) -> list[dict]:
         messages.append(message)
 
 
+def flush(websocket) -> list[dict]:
+    """Round-trip a page switch and return everything before its state."""
+    websocket.send_json({"type": "workspace_switch", "workspaceId": "ws_default"})
+    return drain_until(websocket, "workspace_state")
+
+
 def codes(messages: list[dict]) -> list[str]:
     return [message["code"] for message in messages if message["type"] == "error"]
 
@@ -211,3 +217,170 @@ def test_deleting_block_removes_its_connectors(client: TestClient, login_user) -
         barrier(teacher_ws)
         messages = barrier(student_ws)
         assert set(deleted(messages)) == {"flow-a", "arrow-1"}
+
+
+def frame(
+    object_id: str, x: float = 0, y: float = 0, width: float = 200, height: float = 200
+) -> dict:
+    return {
+        "type": "frame_add",
+        "objectId": object_id,
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+        "fill": None,
+        "pattern": "none",
+        "stroke": "#94a3b8",
+        "strokeWidth": 2,
+    }
+
+
+def test_frame_captures_existing_objects(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+
+    with (
+        ws_connect(client, teacher["token"]) as teacher_ws,
+        ws_connect(client, student["token"]) as student_ws,
+    ):
+        teacher_ws.receive_json()
+        student_ws.receive_json()
+        teacher_ws.receive_json()
+
+        teacher_ws.send_json({**shape("inner"), "shapeType": "process"})
+        recv_until(student_ws, "shape_add")
+
+        teacher_ws.send_json(frame("frame-1"))
+        flushed = flush(teacher_ws)
+        assert "invalid_message" not in codes(flushed)
+        assert recv_until(student_ws, "frame_add")["object"]["id"] == "frame-1"
+        captured = [m for m in flushed if m["type"] == "frame_captured"]
+        assert captured and captured[0]["objectIds"] == ["inner"]
+        captured_student = [m for m in barrier(student_ws) if m["type"] == "frame_captured"]
+        assert captured_student and captured_student[0]["objectIds"] == ["inner"]
+
+
+def test_frame_move_shifts_children(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+
+    with (
+        ws_connect(client, teacher["token"]) as teacher_ws,
+        ws_connect(client, student["token"]) as student_ws,
+    ):
+        teacher_ws.receive_json()
+        student_ws.receive_json()
+        teacher_ws.receive_json()
+
+        teacher_ws.send_json({**shape("inner"), "shapeType": "process"})
+        recv_until(student_ws, "shape_add")
+        teacher_ws.send_json(frame("frame-1"))
+        assert "invalid_message" not in codes(flush(teacher_ws))
+        recv_until(student_ws, "frame_add")
+        barrier(student_ws)
+
+        teacher_ws.send_json({"type": "frame_move", "objectId": "frame-1", "x": 50, "y": 40})
+        moved = [m for m in barrier(student_ws) if m["type"] == "frame_moved"]
+        assert moved
+        assert moved[0]["x"] == 50 and moved[0]["y"] == 40
+        assert moved[0]["children"] == [{"id": "inner", "x": 60, "y": 50}]
+
+
+def test_frame_style_is_broadcast(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+
+    with (
+        ws_connect(client, teacher["token"]) as teacher_ws,
+        ws_connect(client, student["token"]) as student_ws,
+    ):
+        teacher_ws.receive_json()
+        student_ws.receive_json()
+        teacher_ws.receive_json()
+
+        teacher_ws.send_json(frame("frame-1"))
+        assert "invalid_message" not in codes(flush(teacher_ws))
+        recv_until(student_ws, "frame_add")
+        teacher_ws.send_json(
+            {"type": "frame_style", "objectId": "frame-1", "fill": "#ff0000", "pattern": "grid"}
+        )
+        styled = [m for m in barrier(student_ws) if m["type"] == "frame_style"]
+        assert styled and styled[0]["fill"] == "#ff0000"
+        assert styled[0]["pattern"] == "grid"
+
+
+def test_frame_delete_removes_children(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+
+    with (
+        ws_connect(client, teacher["token"]) as teacher_ws,
+        ws_connect(client, student["token"]) as student_ws,
+    ):
+        teacher_ws.receive_json()
+        student_ws.receive_json()
+        teacher_ws.receive_json()
+
+        teacher_ws.send_json({**shape("inner"), "shapeType": "process"})
+        recv_until(student_ws, "shape_add")
+        teacher_ws.send_json(frame("frame-1"))
+        assert "invalid_message" not in codes(flush(teacher_ws))
+        recv_until(student_ws, "frame_add")
+        barrier(student_ws)
+
+        teacher_ws.send_json({"type": "object_delete", "objectId": "frame-1"})
+        barrier(teacher_ws)
+        removed = deleted(barrier(student_ws))
+        assert set(removed) == {"frame-1", "inner"}
+
+
+def test_student_cannot_delete_frame_with_foreign_child(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+
+    with (
+        ws_connect(client, teacher["token"]) as teacher_ws,
+        ws_connect(client, student["token"]) as student_ws,
+    ):
+        teacher_ws.receive_json()
+        student_ws.receive_json()
+        teacher_ws.receive_json()
+
+        student_ws.send_json(frame("student-frame"))
+        assert "invalid_message" not in codes(flush(student_ws))
+        recv_until(teacher_ws, "frame_add")
+
+        teacher_ws.send_json({**shape("foreign"), "shapeType": "process"})
+        recv_until(student_ws, "shape_add")
+
+        student_ws.send_json({"type": "object_delete", "objectId": "student-frame"})
+        assert "forbidden" in codes(barrier(student_ws))
+
+
+def test_transform_recomputes_frame_id(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+
+    with (
+        ws_connect(client, teacher["token"]) as teacher_ws,
+        ws_connect(client, student["token"]) as student_ws,
+    ):
+        teacher_ws.receive_json()
+        student_ws.receive_json()
+        teacher_ws.receive_json()
+
+        teacher_ws.send_json({**shape("inner"), "shapeType": "process"})
+        recv_until(student_ws, "shape_add")
+        teacher_ws.send_json(frame("frame-1"))
+        assert "invalid_message" not in codes(flush(teacher_ws))
+        recv_until(student_ws, "frame_add")
+        barrier(student_ws)
+
+        teacher_ws.send_json({"type": "object_update", "objectId": "inner", "x": 500, "y": 500})
+        outside = [m for m in barrier(student_ws) if m["type"] == "object_update"]
+        assert outside and outside[0].get("frameId") is None
+
+        teacher_ws.send_json({"type": "object_update", "objectId": "inner", "x": 50, "y": 50})
+        inside = [m for m in barrier(student_ws) if m["type"] == "object_update"]
+        assert inside and inside[0].get("frameId") == "frame-1"

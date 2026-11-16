@@ -593,3 +593,102 @@ async def test_connector_add_is_shared(settings, tmp_path, redis_pair) -> None:
 
     await manager_a.shutdown()
     await manager_b.shutdown()
+
+
+async def test_frame_moved_is_shared(settings, tmp_path, redis_pair) -> None:
+    first_redis, second_redis = redis_pair
+    manager_a = make_manager(settings, tmp_path, "frame-a", first_redis)
+    manager_b = make_manager(settings, tmp_path, "frame-b", second_redis)
+    room_a = await manager_a.get_or_create("room-frame")
+    room_b = await manager_b.get_or_create("room-frame")
+
+    frame = {
+        "id": "frame-1",
+        "type": "frame",
+        "author": "u",
+        "workspaceId": "ws_default",
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 200,
+        "fill": None,
+        "pattern": "none",
+        "stroke": "#94a3b8",
+        "strokeWidth": 2,
+    }
+    child = {
+        "id": "child",
+        "type": "shape",
+        "shapeType": "process",
+        "author": "u",
+        "workspaceId": "ws_default",
+        "x": 20,
+        "y": 20,
+        "width": 50,
+        "height": 40,
+        "color": "#2563eb",
+        "strokeWidth": 4,
+        "fill": None,
+        "frameId": "frame-1",
+    }
+    manager_a.add_object(room_a, frame, "ws_default")
+    manager_a.add_object(room_a, child, "ws_default")
+    await manager_a.broadcast(
+        room_a,
+        {
+            "type": "shape_add",
+            "id": "u",
+            "object": child,
+            "workspaceId": "ws_default",
+        },
+    )
+    await manager_a.broadcast(
+        room_a,
+        {
+            "type": "frame_add",
+            "id": "u",
+            "object": frame,
+            "workspaceId": "ws_default",
+        },
+    )
+    await manager_a.broadcast(
+        room_a,
+        {
+            "type": "frame_captured",
+            "frameId": "frame-1",
+            "objectIds": ["child"],
+            "workspaceId": "ws_default",
+        },
+    )
+    await wait_for(lambda: room_b.get_object("child") is not None)
+
+    frame["x"] = 50
+    frame["y"] = 40
+    child["x"] = 70
+    child["y"] = 60
+    await manager_a.broadcast(
+        room_a,
+        {
+            "type": "frame_moved",
+            "frameId": "frame-1",
+            "x": 50,
+            "y": 40,
+            "children": [{"id": "child", "x": 70, "y": 60}],
+            "workspaceId": "ws_default",
+        },
+    )
+
+    def applied() -> bool:
+        remote_frame = room_b.get_object("frame-1")
+        remote_child = room_b.get_object("child")
+        return (
+            remote_frame is not None
+            and remote_frame["x"] == 50
+            and remote_child is not None
+            and remote_child["x"] == 70
+            and remote_child.get("frameId") == "frame-1"
+        )
+
+    await wait_for(applied)
+    await manager_a.shutdown()
+    await manager_b.shutdown()

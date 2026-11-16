@@ -31,7 +31,14 @@ from app.services.workspaces import (
 
 logger = logging.getLogger(__name__)
 
-ADD_EVENTS = {"shape_add", "text_add", "image_add", "stroke_end", "connector_add"}
+ADD_EVENTS = {
+    "shape_add",
+    "text_add",
+    "image_add",
+    "stroke_end",
+    "connector_add",
+    "frame_add",
+}
 OBJECT_EVENTS = {"object_transform", "text_update"}
 
 # Events whose delivery is filtered by the recipient's current workspace. Room-level
@@ -44,6 +51,10 @@ WORKSPACE_SCOPED_EVENTS = {
     "text_add",
     "image_add",
     "connector_add",
+    "frame_add",
+    "frame_captured",
+    "frame_moved",
+    "frame_style",
     "object_update",
     "object_transform",
     "text_update",
@@ -1054,6 +1065,31 @@ class RoomManager:
                 )
         elif kind == "object_delete":
             await self._redis.hdel(objects_key, str(message.get("objectId", "")))
+        elif kind == "frame_captured":
+            for object_id in message.get("objectIds", []):
+                obj = room.get_object(str(object_id))
+                if obj is not None:
+                    await self._redis.hset(
+                        objects_key, str(obj["id"]), json.dumps(obj, ensure_ascii=False)
+                    )
+        elif kind == "frame_moved":
+            frame = room.get_object(str(message.get("frameId", "")))
+            if frame is not None:
+                await self._redis.hset(
+                    objects_key, str(frame["id"]), json.dumps(frame, ensure_ascii=False)
+                )
+            for child in message.get("children", []):
+                obj = room.get_object(str(child.get("id", "")))
+                if obj is not None:
+                    await self._redis.hset(
+                        objects_key, str(obj["id"]), json.dumps(obj, ensure_ascii=False)
+                    )
+        elif kind == "frame_style":
+            obj = room.get_object(str(message.get("objectId", "")))
+            if obj is not None:
+                await self._redis.hset(
+                    objects_key, str(obj["id"]), json.dumps(obj, ensure_ascii=False)
+                )
         elif kind == "clear":
             target = workspace_id or message.get("workspaceId")
             if isinstance(target, str):
@@ -1104,6 +1140,31 @@ class RoomManager:
                 changed = True
         elif kind == "object_delete":
             changed = room.remove_object(str(message.get("objectId", ""))) is not None
+        elif kind == "frame_captured":
+            frame_id = message.get("frameId")
+            for object_id in message.get("objectIds", []):
+                obj = room.get_object(str(object_id))
+                if obj is not None and isinstance(frame_id, str):
+                    obj["frameId"] = frame_id
+                    changed = True
+        elif kind == "frame_moved":
+            frame = room.get_object(str(message.get("frameId", "")))
+            if frame is not None:
+                frame["x"] = message.get("x", frame.get("x"))
+                frame["y"] = message.get("y", frame.get("y"))
+                changed = True
+            for child in message.get("children", []):
+                obj = room.get_object(str(child.get("id", "")))
+                if obj is not None:
+                    obj["x"] = child.get("x", obj.get("x"))
+                    obj["y"] = child.get("y", obj.get("y"))
+                    changed = True
+        elif kind == "frame_style":
+            obj = room.get_object(str(message.get("objectId", "")))
+            if obj is not None:
+                obj["fill"] = message.get("fill")
+                obj["pattern"] = message.get("pattern")
+                changed = True
         elif kind == "clear":
             workspace_id = message.get("workspaceId")
             if isinstance(workspace_id, str):

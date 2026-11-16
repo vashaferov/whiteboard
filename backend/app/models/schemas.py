@@ -247,6 +247,33 @@ class ConnectorAdd(_Message):
     strokeWidth: float = Field(ge=1, le=200)
 
 
+class FrameAdd(_Message):
+    type: Literal["frame_add"]
+    objectId: str = Field(pattern=OBJECT_ID_PATTERN)
+    x: float = Field(ge=COORD_MIN, le=COORD_MAX)
+    y: float = Field(ge=COORD_MIN, le=COORD_MAX)
+    width: float = Field(ge=COORD_MIN, le=COORD_MAX)
+    height: float = Field(ge=COORD_MIN, le=COORD_MAX)
+    fill: str | None = Field(default=None, pattern=COLOR_PATTERN)
+    pattern: Literal["none", "lines", "grid"] = "none"
+    stroke: str = Field(default="#94a3b8", pattern=COLOR_PATTERN)
+    strokeWidth: float = Field(default=2, ge=1, le=50)
+
+
+class FrameMove(_Message):
+    type: Literal["frame_move"]
+    objectId: str = Field(pattern=OBJECT_ID_PATTERN)
+    x: float = Field(ge=COORD_MIN, le=COORD_MAX)
+    y: float = Field(ge=COORD_MIN, le=COORD_MAX)
+
+
+class FrameStyle(_Message):
+    type: Literal["frame_style"]
+    objectId: str = Field(pattern=OBJECT_ID_PATTERN)
+    fill: str | None = Field(default=None, pattern=COLOR_PATTERN)
+    pattern: Literal["none", "lines", "grid"] = "none"
+
+
 class ObjectTransform(_Message):
     type: Literal["object_transform"]
     objectId: str = Field(pattern=OBJECT_ID_PATTERN)
@@ -367,6 +394,9 @@ ClientMessage = Annotated[
     | ImageAdd
     | ObjectUpdate
     | ConnectorAdd
+    | FrameAdd
+    | FrameMove
+    | FrameStyle
     | ObjectTransform
     | TextUpdate
     | ObjectDelete

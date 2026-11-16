@@ -17,6 +17,9 @@ from app.models.schemas import (
     ClientMessage,
     ConnectorAdd,
     Cursor,
+    FrameAdd,
+    FrameMove,
+    FrameStyle,
     ImageAdd,
     Kick,
     ObjectDelete,
@@ -82,6 +85,95 @@ def _new_object(
 
 def _can_edit_object(user: ConnectedUser, obj: dict[str, Any]) -> bool:
     return is_staff(user.role) or obj.get("author") == user.id
+
+
+def _frame_rect(frame: dict[str, Any]) -> tuple[float, float, float, float]:
+    x = float(frame.get("x", 0))
+    y = float(frame.get("y", 0))
+    width = float(frame.get("width", 0))
+    height = float(frame.get("height", 0))
+    return min(x, x + width), min(y, y + height), abs(width), abs(height)
+
+
+def _object_anchor(obj: dict[str, Any]) -> tuple[float, float] | None:
+    obj_type = obj.get("type")
+    x = float(obj.get("x", 0))
+    y = float(obj.get("y", 0))
+    if obj_type == "text":
+        return x, y
+    if obj_type in ("shape", "image"):
+        width = float(obj.get("width", 0))
+        height = float(obj.get("height", 0))
+        return x + width / 2, y + height / 2
+    return None
+
+
+def _frame_contains(frame: dict[str, Any], point: tuple[float, float]) -> bool:
+    left, top, width, height = _frame_rect(frame)
+    return left <= point[0] <= left + width and top <= point[1] <= top + height
+
+
+def _attach_to_frame(room: Room, obj: dict[str, Any]) -> str | None:
+    """Attach an object to the latest frame under its anchor; detach otherwise."""
+    if obj.get("type") in ("frame", "connector"):
+        return None
+    anchor = _object_anchor(obj)
+    if anchor is None:
+        return None
+    best: dict[str, Any] | None = None
+    for candidate in room.objects:
+        if candidate.get("type") != "frame":
+            continue
+        if candidate.get("workspaceId") != obj.get("workspaceId"):
+            continue
+        if not _frame_contains(candidate, anchor):
+            continue
+        if best is None or candidate.get("seq", 0) > best.get("seq", 0):
+            best = candidate
+    if best is None:
+        obj.pop("frameId", None)
+        return None
+    obj["frameId"] = best["id"]
+    return best["id"]
+
+
+def _capture_into_frame(room: Room, frame: dict[str, Any]) -> list[str]:
+    captured: list[str] = []
+    for obj in room.objects:
+        if obj is frame or obj.get("type") in ("frame", "connector"):
+            continue
+        if obj.get("frameId") is not None:
+            continue
+        if obj.get("workspaceId") != frame.get("workspaceId"):
+            continue
+        anchor = _object_anchor(obj)
+        if anchor is None or not _frame_contains(frame, anchor):
+            continue
+        obj["frameId"] = frame["id"]
+        captured.append(str(obj["id"]))
+    return captured
+
+
+def _deletion_cascade(room: Room, obj: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+
+    def connector_ids(block_id: str) -> None:
+        for candidate in room.objects:
+            if candidate.get("type") == "connector" and (
+                candidate.get("fromId") == block_id or candidate.get("toId") == block_id
+            ):
+                ids.append(str(candidate["id"]))
+
+    if obj.get("type") == "shape" and obj.get("shapeType") in FLOW_SHAPES:
+        connector_ids(str(obj["id"]))
+    elif obj.get("type") == "frame":
+        for child in list(room.objects):
+            if child.get("frameId") != obj["id"]:
+                continue
+            ids.append(str(child["id"]))
+            if child.get("type") == "shape" and child.get("shapeType") in FLOW_SHAPES:
+                connector_ids(str(child["id"]))
+    return list(dict.fromkeys(ids))
 
 
 async def _check_workspace(manager: RoomManager, user: ConnectedUser, message: Any) -> bool:
@@ -251,6 +343,12 @@ async def _handle_message(
         await _handle_object_update(manager, room, user, message)
     elif isinstance(message, ConnectorAdd):
         await _handle_connector_add(manager, room, user, message)
+    elif isinstance(message, FrameAdd):
+        await _handle_frame_add(manager, room, user, message)
+    elif isinstance(message, FrameMove):
+        await _handle_frame_move(manager, room, user, message)
+    elif isinstance(message, FrameStyle):
+        await _handle_frame_style(manager, room, user, message)
     elif isinstance(message, ObjectTransform):
         await _handle_object_transform(manager, room, user, message)
     elif isinstance(message, TextUpdate):
@@ -393,6 +491,7 @@ async def _handle_shape_add(
         strokeWidth=message.strokeWidth,
         fill=message.fill,
     )
+    _attach_to_frame(room, obj)
     manager.add_object(room, obj, user.workspace_id)
     await manager.broadcast(
         room,
@@ -454,6 +553,131 @@ async def _handle_connector_add(
     )
 
 
+async def _handle_frame_add(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: FrameAdd,
+) -> None:
+    if not await _check_workspace(manager, user, message):
+        return
+    if room.get_object(message.objectId) is not None:
+        return
+    if not manager.has_capacity(room):
+        await manager.send_to(user, _error("room_full", "Достигнут лимит объектов на доске"))
+        return
+    left = min(message.x, message.x + message.width)
+    top = min(message.y, message.y + message.height)
+    obj = _new_object(
+        user,
+        message.objectId,
+        "frame",
+        x=left,
+        y=top,
+        width=abs(message.width),
+        height=abs(message.height),
+        fill=message.fill,
+        pattern=message.pattern,
+        stroke=message.stroke,
+        strokeWidth=message.strokeWidth,
+        rotation=0,
+    )
+    manager.add_object(room, obj, user.workspace_id)
+    await manager.broadcast(
+        room,
+        {"type": "frame_add", "id": user.id, "object": obj, "workspaceId": user.workspace_id},
+        exclude=user.id,
+        workspace_id=user.workspace_id,
+    )
+    captured = _capture_into_frame(room, obj)
+    if captured:
+        manager.mark_dirty(room)
+        await manager.broadcast(
+            room,
+            {
+                "type": "frame_captured",
+                "frameId": obj["id"],
+                "objectIds": captured,
+                "workspaceId": user.workspace_id,
+            },
+            workspace_id=user.workspace_id,
+        )
+
+
+async def _handle_frame_move(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: FrameMove,
+) -> None:
+    obj = await _check_object_workspace(manager, room, user, message)
+    if obj is None:
+        return
+    if obj.get("type") != "frame":
+        await manager.send_to(user, _error("invalid_message", "Объект не является фреймом"))
+        return
+    if not _can_edit_object(user, obj):
+        await manager.send_to(user, _error("forbidden", "Можно двигать только свои фреймы"))
+        return
+
+    dx = message.x - float(obj.get("x", 0))
+    dy = message.y - float(obj.get("y", 0))
+    obj["x"] = message.x
+    obj["y"] = message.y
+    children: list[dict[str, Any]] = []
+    for child in room.objects:
+        if child.get("frameId") != obj["id"]:
+            continue
+        if child.get("type") == "connector":
+            continue
+        child["x"] = float(child.get("x", 0)) + dx
+        child["y"] = float(child.get("y", 0)) + dy
+        children.append({"id": child["id"], "x": child["x"], "y": child["y"]})
+    manager.mark_dirty(room)
+    await manager.broadcast(
+        room,
+        {
+            "type": "frame_moved",
+            "frameId": obj["id"],
+            "x": obj["x"],
+            "y": obj["y"],
+            "children": children,
+            "workspaceId": user.workspace_id,
+        },
+        workspace_id=user.workspace_id,
+    )
+
+
+async def _handle_frame_style(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: FrameStyle,
+) -> None:
+    obj = await _check_object_workspace(manager, room, user, message)
+    if obj is None:
+        return
+    if obj.get("type") != "frame":
+        await manager.send_to(user, _error("invalid_message", "Объект не является фреймом"))
+        return
+    if not _can_edit_object(user, obj):
+        await manager.send_to(user, _error("forbidden", "Можно менять только свои фреймы"))
+        return
+    manager.update_object_fields(room, message.objectId, fill=message.fill, pattern=message.pattern)
+    await manager.broadcast(
+        room,
+        {
+            "type": "frame_style",
+            "objectId": message.objectId,
+            "fill": message.fill,
+            "pattern": message.pattern,
+            "workspaceId": user.workspace_id,
+        },
+        exclude=user.id,
+        workspace_id=user.workspace_id,
+    )
+
+
 async def _handle_text_add(
     manager: RoomManager,
     room: Room,
@@ -477,6 +701,7 @@ async def _handle_text_add(
         color=message.color,
         fontSize=message.fontSize,
     )
+    _attach_to_frame(room, obj)
     manager.add_object(room, obj, user.workspace_id)
     await manager.broadcast(
         room,
@@ -512,6 +737,7 @@ async def _handle_image_add(
         width=message.width,
         height=message.height,
     )
+    _attach_to_frame(room, obj)
     manager.add_object(room, obj, user.workspace_id)
     await manager.broadcast(
         room,
@@ -534,6 +760,7 @@ async def _handle_object_update(
         await manager.send_to(user, _error("forbidden", "Можно перемещать только свои объекты"))
         return
     manager.update_object(room, message.objectId, message.x, message.y)
+    _attach_to_frame(room, obj)
     await manager.broadcast(
         room,
         {
@@ -542,6 +769,7 @@ async def _handle_object_update(
             "objectId": message.objectId,
             "x": message.x,
             "y": message.y,
+            "frameId": obj.get("frameId"),
             "workspaceId": user.workspace_id,
         },
         exclude=user.id,
@@ -576,7 +804,11 @@ async def _handle_object_transform(
         if message.fontSize is not None:
             fields["fontSize"] = message.fontSize
     else:
-        if obj.get("type") == "shape" and obj.get("shapeType") in FLOW_SHAPES:
+        if (
+            obj.get("type") == "shape"
+            and obj.get("shapeType") in FLOW_SHAPES
+            or obj.get("type") == "frame"
+        ):
             fields["rotation"] = 0
         if message.width is not None and message.width != 0:
             fields["width"] = message.width
@@ -586,6 +818,7 @@ async def _handle_object_transform(
     updated = manager.update_object_fields(room, message.objectId, **fields)
     if updated is None:
         return
+    _attach_to_frame(room, updated)
     await manager.broadcast(
         room,
         {
@@ -647,15 +880,13 @@ async def _handle_object_delete(
     if not (is_staff(user.role) or obj.get("author") == user.id):
         await manager.send_to(user, _error("forbidden", "Удалять можно только свои объекты"))
         return
+    if obj.get("type") == "frame" and not is_staff(user.role):
+        children = [child for child in room.objects if child.get("frameId") == obj["id"]]
+        if any(child.get("author") != user.id for child in children):
+            await manager.send_to(user, _error("forbidden", "Во фрейме есть чужие объекты"))
+            return
 
-    cascade_ids: list[str] = []
-    if obj.get("type") == "shape" and obj.get("shapeType") in FLOW_SHAPES:
-        for candidate in list(room.objects):
-            if candidate.get("type") == "connector" and (
-                candidate.get("fromId") == message.objectId
-                or candidate.get("toId") == message.objectId
-            ):
-                cascade_ids.append(str(candidate["id"]))
+    cascade_ids = _deletion_cascade(room, obj)
     for cascade_id in cascade_ids:
         manager.delete_object(room, cascade_id)
 
