@@ -27,3 +27,6 @@ e2e/.cache/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Superpowers scratch (ledger, briefs, review packages)
+.superpowers/
