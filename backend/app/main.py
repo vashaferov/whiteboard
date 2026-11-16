@@ -60,8 +60,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.accounts = accounts
         app.state.images = images
         app.state.manager = manager
-        app.state.login_limiter = WindowLimiter(10, 60)
-        app.state.register_limiter = WindowLimiter(5, 60)
+        app.state.login_limiter = WindowLimiter(settings.auth_login_per_minute, 60)
+        app.state.register_limiter = WindowLimiter(settings.auth_register_per_minute, 60)
         logger.info(
             "Whiteboard started (board %sx%s, data=%s, redis=%s, s3=%s)",
             settings.board_width,

@@ -8,28 +8,44 @@ import {
   drawRect,
   firstObjectId,
   hasText,
-  login,
+  makeActiveStudent,
+  makeRoomWithAccess,
+  makeTeacher,
   moveWorld,
+  openRoom,
   reloadAndWait,
   selectObject,
+  signInWith,
   transformerAnchor,
-  uniqueRoom,
+  uniqueLogin,
   waitForObjectCount,
   waitForSelectedSize,
 } from '../helpers.js';
 
 test('main lesson: drawing, cursor, transforms, text editing, reload', async ({
   browser,
+  request,
 }) => {
-  const room = uniqueRoom('lesson');
+  const teacherLogin = uniqueLogin('teacher');
+  const studentLogin = uniqueLogin('student');
+  await makeTeacher(request, { login: teacherLogin, name: 'Учитель' });
+  await makeActiveStudent(request, { login: studentLogin, name: 'Ученик' });
+  const room = await makeRoomWithAccess(request, {
+    teacher: teacherLogin,
+    student: studentLogin,
+    name: 'Урок',
+  });
+
   const teacherContext = await browser.newContext();
   const studentContext = await browser.newContext();
   const teacher = await teacherContext.newPage();
   const student = await studentContext.newPage();
   const errors = [...collectErrors(teacher, 'teacher'), ...collectErrors(student, 'student')];
 
-  await login(teacher, { name: 'Учитель', role: 'teacher', room });
-  await login(student, { name: 'Ученик', role: 'student', room });
+  await signInWith(request, teacher, teacherLogin);
+  await openRoom(teacher, room.id);
+  await signInWith(request, student, studentLogin);
+  await openRoom(student, room.id);
 
   // Drawing is broadcast to the other participant.
   await drawRect(teacher, { x: 300, y: 300 }, { x: 450, y: 400 });
@@ -86,12 +102,16 @@ test('main lesson: drawing, cursor, transforms, text editing, reload', async ({
   await teacher.press('#text-editor', 'Enter');
   await hasText(student, 'Обновлённый текст');
 
-  // Reload keeps transforms and the edited text (session + snapshot restore).
+  // Reload keeps the session, room and board (cookie + snapshot restore).
   await reloadAndWait(student);
   await waitForObjectCount(student, 2, 15_000);
   await hasText(student, 'Обновлённый текст');
 
   expect(errors).toEqual([]);
+
+  await student.click('#leave-btn');
+  await expect(student.locator('#dashboard')).toBeVisible();
+  await expect(student.locator('#app')).toBeHidden();
 
   await teacherContext.close();
   await studentContext.close();

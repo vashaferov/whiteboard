@@ -46,6 +46,8 @@ export default defineConfig({
           ADMIN_LOGIN: 'e2e-admin',
           ADMIN_PASSWORD: 'e2e-admin-pass',
           PASSWORD_ROUNDS: '4',
+          AUTH_LOGIN_PER_MINUTE: '100',
+          AUTH_REGISTER_PER_MINUTE: '100',
           DATA_DIR: path.resolve(__dirname, '.data'),
           UPLOADS_DIR: path.resolve(__dirname, '.uploads'),
           FRONTEND_DIR: path.resolve(__dirname, '../frontend'),

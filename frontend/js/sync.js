@@ -10,13 +10,13 @@ const CLOSE_REASONS = {
   4400: 'invalid_room',
   4401: 'unauthorized',
   4403: 'forbidden',
+  4404: 'room_not_found',
   4409: 'replaced',
 };
 
 export class SyncClient {
-  constructor({ roomId, token, onEvent, onStatus, onFatal, workspaceId }) {
+  constructor({ roomId, onEvent, onStatus, onFatal, workspaceId }) {
     this.roomId = roomId;
-    this.token = token;
     this.workspaceId = workspaceId ?? '';
     this.onEvent = onEvent;
     this.onStatus = onStatus;
@@ -33,11 +33,9 @@ export class SyncClient {
     this.onStatus?.('connecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    let url = `${protocol}://${window.location.host}/ws/${encodeURIComponent(
-      this.roomId,
-    )}?token=${encodeURIComponent(this.token)}`;
+    let url = `${protocol}://${window.location.host}/ws/${encodeURIComponent(this.roomId)}`;
     if (this.workspaceId) {
-      url += `&workspace=${encodeURIComponent(this.workspaceId)}`;
+      url += `?workspace=${encodeURIComponent(this.workspaceId)}`;
     }
 
     let socket;

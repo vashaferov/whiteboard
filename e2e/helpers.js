@@ -60,6 +60,38 @@ export async function signInWith(request, page, login, password = DEFAULT_PASSWO
   await page.context().addCookies(state.cookies);
 }
 
+export async function createRoom(request, login, name = 'Комната', password = DEFAULT_PASSWORD) {
+  await apiLogin(request, login, password);
+  const response = await request.post('/api/rooms', { data: { name } });
+  expect(response.ok()).toBeTruthy();
+  return response.json();
+}
+
+export async function grantAccess(request, roomId, teacherLogin, studentLogin) {
+  await apiLogin(request, teacherLogin);
+  const response = await request.get(`/api/users?q=${encodeURIComponent(studentLogin)}`);
+  expect(response.ok()).toBeTruthy();
+  const students = await response.json();
+  const student = students.find((item) => item.login === studentLogin);
+  if (!student) throw new Error(`student ${studentLogin} was not found`);
+  const updated = await request.put(`/api/rooms/${roomId}/access`, {
+    data: { userIds: [student.id] },
+  });
+  expect(updated.ok()).toBeTruthy();
+}
+
+export async function makeRoomWithAccess(request, { teacher, student, name = 'Комната' }) {
+  const room = await createRoom(request, teacher, name);
+  await grantAccess(request, room.id, teacher, student);
+  return room;
+}
+
+export async function openRoom(page, roomId) {
+  await page.goto(`/?room=${encodeURIComponent(roomId)}`);
+  await expect(page.locator('#app')).toBeVisible();
+  await expect(page.locator('#status')).toHaveText('Подключено', { timeout: 15_000 });
+}
+
 export function uniqueRoom(prefix = 'e2e') {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }

@@ -2,29 +2,45 @@ import { expect, test } from '@playwright/test';
 
 import {
   drawRect,
-  login,
+  makeActiveStudent,
+  makeRoomWithAccess,
+  makeTeacher,
   objectCount,
+  openRoom,
   reloadAndWait,
-  uniqueRoom,
+  signInWith,
+  uniqueLogin,
   waitForObjectCount,
 } from '../helpers.js';
 
 test('reconnect: reload restores the session and the socket keeps syncing', async ({
   browser,
+  request,
 }) => {
-  const room = uniqueRoom('reconnect');
+  const teacherLogin = uniqueLogin('teacher');
+  const studentLogin = uniqueLogin('student');
+  await makeTeacher(request, { login: teacherLogin, name: 'Учитель' });
+  await makeActiveStudent(request, { login: studentLogin, name: 'Ученик' });
+  const room = await makeRoomWithAccess(request, {
+    teacher: teacherLogin,
+    student: studentLogin,
+    name: 'Reconnect',
+  });
+
   const teacherContext = await browser.newContext();
   const studentContext = await browser.newContext();
   const teacher = await teacherContext.newPage();
   const student = await studentContext.newPage();
 
-  await login(teacher, { name: 'Учитель', role: 'teacher', room });
-  await login(student, { name: 'Ученик', role: 'student', room });
+  await signInWith(request, teacher, teacherLogin);
+  await openRoom(teacher, room.id);
+  await signInWith(request, student, studentLogin);
+  await openRoom(student, room.id);
 
   await drawRect(teacher, { x: 200, y: 200 }, { x: 340, y: 300 });
   await waitForObjectCount(student, 1);
 
-  // A reload reconnects with the stored token and restores the snapshot.
+  // A reload reconnects with the cookie session and restores the room.
   await reloadAndWait(teacher);
   await waitForObjectCount(teacher, 1, 15_000);
   expect(await objectCount(teacher)).toBe(1);

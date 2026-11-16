@@ -4,11 +4,11 @@ import { Board } from './board.js';
 import { ToolManager } from './tools.js';
 import { SyncClient } from './sync.js';
 import { PagesPanel } from './pages.js';
-import { authApi } from './api.js';
+import { authApi, roomsApi } from './api.js';
 import { initAuth, showAuth } from './auth.js';
 import { initDashboard, showDashboard } from './dashboard.js';
 
-const SESSION_KEY = 'wb:session';
+const ROOM_KEY = 'wb:room';
 const DEFAULT_BOARD = { width: 1600, height: 900 };
 const PALETTE = ['#111827', '#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777'];
 const TOOL_KEYS = {
@@ -24,9 +24,10 @@ const TOOL_KEYS = {
 const FATAL_MESSAGES = {
   unauthorized: 'Сессия истекла — войдите снова',
   forbidden: 'Нет доступа к этой комнате',
-  invalid_room: 'Некорректный код комнаты',
+  room_not_found: 'Комната не найдена',
+  invalid_room: 'Некорректный id комнаты',
   replaced: 'Урок открыт в другой вкладке',
-  kicked: 'Учитель отключил вас от урока',
+  kicked: 'Доступ к комнате закрыт',
   closed: 'Соединение закрыто',
 };
 
@@ -71,23 +72,27 @@ function round(value) {
   return Math.round(value * 100) / 100;
 }
 
-// ------------------------------------------------------------------ session
+// ------------------------------------------------------------------ room state
 
-function loadSession() {
+function loadRoomState() {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
+    const raw = sessionStorage.getItem(ROOM_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
 }
 
-function saveSession(session) {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+function saveRoomState() {
+  if (!state.roomId) return;
+  sessionStorage.setItem(
+    ROOM_KEY,
+    JSON.stringify({ roomId: state.roomId, workspaceId: state.workspaceId ?? '' }),
+  );
 }
 
-function clearSession() {
-  sessionStorage.removeItem(SESSION_KEY);
+function clearRoomState() {
+  sessionStorage.removeItem(ROOM_KEY);
 }
 
 // --------------------------------------------------------------------- boot
@@ -122,6 +127,11 @@ function startApp(me) {
   state.user = me.user;
   state.permissions = me.permissions;
   state.boardSize = me.board || DEFAULT_BOARD;
+  const roomId = new URLSearchParams(window.location.search).get('room');
+  if (roomId) {
+    openRoom(roomId);
+    return;
+  }
   showDashboard({ user: me.user, permissions: me.permissions });
 }
 
@@ -140,7 +150,7 @@ function cacheElements() {
   els.board = $('#board');
   els.pagesPanel = $('#pages-panel');
   els.status = $('#status');
-  els.roomLabel = $('#room-label');
+  els.roomTitle = $('#room-title');
   els.userList = $('#user-list');
   els.userCount = $('#user-count');
   els.pullActions = $('#pull-actions');
@@ -159,15 +169,40 @@ function cacheElements() {
   els.toast = $('#toast');
 }
 
-function startSession(session) {
-  state.token = session.token;
-  state.roomId = session.roomId;
-  state.user = session.user || null;
-  state.permissions = session.permissions || state.permissions;
+function isStaff(role) {
+  return role === 'teacher' || role === 'admin';
+}
+
+async function openRoom(roomId) {
+  try {
+    const room = await roomsApi.get(roomId);
+    startRoom({
+      room,
+      user: state.user,
+      permissions: state.permissions,
+      board: state.boardSize,
+    });
+  } catch (error) {
+    if (error.status === 401) {
+      showAuth('Сессия истекла — войдите снова');
+      return;
+    }
+    if (state.user) {
+      showDashboard({ user: state.user, permissions: state.permissions });
+    }
+    toast(error.message || 'Не удалось открыть комнату');
+  }
+}
+
+function startRoom({ room, user, permissions, board }) {
+  state.roomId = room.id;
+  state.user = user;
+  state.permissions = permissions;
   state.ready = false;
   state.leaving = false;
   state.workspaces = [];
-  state.workspaceId = session.workspaceId || null;
+  const saved = loadRoomState();
+  state.workspaceId = saved && saved.roomId === room.id ? saved.workspaceId || null : null;
   state.pendingWorkspaceId = null;
   state.pendingEvents = [];
   state.stateVersion = 0;
@@ -178,15 +213,17 @@ function startSession(session) {
   $('#status-screen').hidden = true;
   $('#dashboard').hidden = true;
   els.app.hidden = false;
-  els.roomLabel.textContent = session.roomId;  els.usersHint.textContent = '';
-  history.replaceState(null, '', `?room=${encodeURIComponent(session.roomId)}`);
+  els.roomTitle.textContent = room.name;
+  els.usersHint.textContent = '';
+  history.replaceState(null, '', `?room=${encodeURIComponent(room.id)}`);
 
+  const size = board || DEFAULT_BOARD;
   state.board = new Board(els.board, {
-    width: (session.board || DEFAULT_BOARD).width,
-    height: (session.board || DEFAULT_BOARD).height,
+    width: size.width,
+    height: size.height,
     canEditObject: (object) =>
       Boolean(state.user) &&
-      (state.user.role === 'teacher' || object.author === state.user.id),
+      (isStaff(state.user.role) || object.author === state.user.id),
     onObjectMove: (objectId, x, y) => {
       sendWorkspace({
         type: 'object_update',
@@ -224,12 +261,11 @@ function startSession(session) {
   setupCursorBroadcast();
 
   state.sync = new SyncClient({
-    roomId: session.roomId,
-    token: session.token,
-    workspaceId: session.workspaceId,
+    roomId: room.id,
+    workspaceId: state.workspaceId,
     onEvent: handleServerEvent,
     onStatus: handleConnectionStatus,
-    onFatal: (reason) => leaveLesson(FATAL_MESSAGES[reason] || FATAL_MESSAGES.closed),
+    onFatal: handleFatal,
   });
 
   selectTool(state.tool);
@@ -239,7 +275,19 @@ function startSession(session) {
   state.sync.connect();
 }
 
-function leaveLesson(message = '') {
+function handleFatal(reason) {
+  if (reason === 'unauthorized') {
+    showAuth('Сессия истекла — войдите снова');
+    return;
+  }
+  if (reason === 'replaced') {
+    showAuth('Урок открыт в другой вкладке');
+    return;
+  }
+  leaveRoom(FATAL_MESSAGES[reason] || FATAL_MESSAGES.closed);
+}
+
+function leaveRoom(message = '') {
   if (state.leaving) return;
   state.leaving = true;
 
@@ -249,7 +297,6 @@ function leaveLesson(message = '') {
   state.sync = null;
   state.tools = null;
   state.board = null;
-  state.user = null;
   state.users.clear();
   state.ready = false;
   state.textPoint = null;
@@ -261,16 +308,24 @@ function leaveLesson(message = '') {
   state.stateVersion = 0;
   state.selectedStudentIds = new Set();
   state.moveRequestId = null;
+  state.roomId = null;
   pagesPanel = null;
   els.pagesPanel.replaceChildren();
 
-  clearSession();
+  clearRoomState();
   els.textEditor.hidden = true;
   els.textEditor.value = '';
   els.app.hidden = true;
   els.clearBtn.hidden = true;
-  showAuth(message);
-  history.replaceState(null, '', window.location.pathname);
+  history.replaceState(null, '', '/');
+
+  if (state.user) {
+    showDashboard({ user: state.user, permissions: state.permissions });
+  } else {
+    showAuth(message);
+    return;
+  }
+  if (message) toast(message);
 }
 
 // ------------------------------------------------------------------- toolbar
@@ -295,7 +350,7 @@ function bindToolbar() {
 
   els.imageBtn.addEventListener('click', () => els.fileInput.click());
   els.fileInput.addEventListener('change', uploadImage);
-  els.leaveBtn.addEventListener('click', () => leaveLesson('Вы вышли из урока'));
+  els.leaveBtn.addEventListener('click', () => leaveRoom('Вы вышли из комнаты'));
 
   els.pullSelected.addEventListener('click', () => {
     if (!state.selectedStudentIds.size) return;
@@ -551,10 +606,7 @@ function renderPages() {
 
 function persistSessionWorkspace() {
   if (state.sync) state.sync.workspaceId = state.workspaceId ?? '';
-  const session = loadSession();
-  if (!session) return;
-  session.workspaceId = state.workspaceId;
-  saveSession(session);
+  saveRoomState();
 }
 
 // A pending switch can be refused (stale id) or lose its target (page deleted
@@ -683,7 +735,7 @@ function handleServerEvent(message) {
       toast(message.message || 'Ошибка');
       break;
     case 'kicked':
-      toast(message.reason || 'Учитель отключил вас');
+      leaveRoom(message.reason || 'Доступ к комнате закрыт');
       break;
     default:
       break;
@@ -865,17 +917,11 @@ function handleInit(message) {
   setStatus('online', 'Подключено');
 
   els.usersHint.textContent =
-    message.role === 'teacher'
+    isStaff(message.role)
       ? 'Двойной клик по тексту — редактировать. Рамка — масштаб и поворот. × — отключить ученика.'
       : 'Свои объекты можно двигать, масштабировать и поворачивать. Двойной клик по своему тексту — редактировать.';
 
-  const session = loadSession();
-  if (session) {
-    session.user = state.user;
-    session.permissions = state.permissions;
-    session.workspaceId = state.workspaceId;
-    saveSession(session);
-  }
+  saveRoomState();
 }
 
 function handleConnectionStatus(status) {
@@ -896,8 +942,10 @@ function setStatus(kind, text) {
 // -------------------------------------------------------------------- users
 
 function renderUsers() {
+  const rank = (role) => (isStaff(role) ? 0 : 1);
   const users = Array.from(state.users.values()).sort((left, right) => {
-    if (left.role !== right.role) return left.role === 'teacher' ? -1 : 1;
+    if (rank(left.role) !== rank(right.role)) return rank(left.role) - rank(right.role);
+    if (left.role !== right.role) return left.role === 'admin' ? -1 : 1;
     return left.name.localeCompare(right.name, 'ru');
   });
 
@@ -940,10 +988,10 @@ function renderUsers() {
     name.textContent = user.name;
     item.appendChild(name);
 
-    if (user.role === 'teacher') {
+    if (isStaff(user.role)) {
       const badge = document.createElement('span');
       badge.className = 'badge';
-      badge.textContent = 'учитель';
+      badge.textContent = user.role === 'admin' ? 'администратор' : 'учитель';
       item.appendChild(badge);
     }
 
@@ -972,7 +1020,7 @@ function renderUsers() {
 }
 
 function canPullStudents() {
-  return Boolean(state.permissions.canManageUsers) && state.user?.role === 'teacher';
+  return Boolean(state.permissions.canManageUsers) && isStaff(state.user?.role);
 }
 
 function updatePullActions() {

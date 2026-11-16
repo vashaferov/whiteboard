@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     session_ttl_hours: int = 12
     cookie_secure: bool = False
     password_rounds: int = 12
+    auth_login_per_minute: int = 10
+    auth_register_per_minute: int = 5
 
     board_width: int = 1600
     board_height: int = 900
