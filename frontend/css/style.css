@@ -906,3 +906,99 @@ kbd {
   padding: 0;
   list-style: none;
 }
+
+.btn--small {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.room-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.room-card__name {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.room-card__owner {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.room-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+
+.access-dialog {
+  width: min(520px, 100%);
+  padding: 22px;
+  border: none;
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
+}
+
+.access-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.access-dialog__title {
+  margin: 0 0 12px;
+  font-size: 17px;
+  color: #0f172a;
+}
+
+.access-dialog__search {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: inherit;
+}
+
+.access-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  margin: 0 0 14px;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.access-item label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.access-item label:hover {
+  background: #f1f5f9;
+}
+
+.access-list__empty {
+  padding: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.access-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

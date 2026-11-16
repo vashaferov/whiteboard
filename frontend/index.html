@@ -103,10 +103,28 @@
           </div>
           <ul id="dash-rooms" class="room-list"></ul>
           <p id="dash-empty" class="dashboard__empty" hidden></p>
+          <p id="dash-error" class="login__error" role="alert"></p>
         </section>
 
         <section id="dash-admin" class="dashboard__section dashboard__section--admin" hidden></section>
       </main>
+
+      <dialog id="access-dialog" class="access-dialog">
+        <h2 id="access-title" class="access-dialog__title">Доступ к комнате</h2>
+        <input
+          id="access-search"
+          class="access-dialog__search"
+          type="search"
+          placeholder="Поиск ученика по имени или логину"
+          autocomplete="off"
+        />
+        <p id="access-error" class="login__error" role="alert"></p>
+        <ul id="access-list" class="access-list"></ul>
+        <div class="access-dialog__actions">
+          <button id="access-cancel" class="btn btn--ghost" type="button">Отмена</button>
+          <button id="access-save" class="btn btn--primary" type="button">Сохранить</button>
+        </div>
+      </dialog>
     </div>
 
     <!-- Рабочее пространство -->
