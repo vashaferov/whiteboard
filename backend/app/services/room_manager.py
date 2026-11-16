@@ -355,28 +355,81 @@ class RoomManager:
                 await self._redis.hdel(self._presence_key(room.id), *stale)
         return list(users.values())
 
-    async def kick(self, room_id: str, target_id: str) -> bool:
+    async def kick(self, room_id: str, target_id: str, *, reason: str | None = None) -> bool:
         room = self.rooms.get(room_id)
-        if room is None:
-            return False
         if self._redis is not None:
+            if room is None:
+                if not await self._presence_has(room_id, target_id):
+                    return False
+                await self._publish(
+                    room_id,
+                    {
+                        "event": {
+                            "type": "remote_kick",
+                            "target": target_id,
+                            "reason": reason,
+                        }
+                    },
+                )
+                return True
             if target_id not in room.users and not await self._presence_has(room_id, target_id):
                 return False
-            await self._publish(room_id, {"event": {"type": "remote_kick", "target": target_id}})
-            await self._kick_local(room, target_id)
+            await self._publish(
+                room_id,
+                {
+                    "event": {
+                        "type": "remote_kick",
+                        "target": target_id,
+                        "reason": reason,
+                    }
+                },
+            )
+            await self._kick_local(room, target_id, reason=reason)
             return True
-        if target_id not in room.users:
+        if room is None or target_id not in room.users:
             return False
-        return await self._kick_local(room, target_id)
+        return await self._kick_local(room, target_id, reason=reason)
 
-    async def _kick_local(self, room: Room, target_id: str) -> bool:
+    async def _kick_local(self, room: Room, target_id: str, *, reason: str | None = None) -> bool:
         user = room.users.get(target_id)
         if user is None:
             return False
-        await self.send_to(user, {"type": "kicked", "reason": "Учитель отключил вас от урока"})
+        await self.send_to(
+            user,
+            {
+                "type": "kicked",
+                "reason": reason or "Учитель отключил вас от урока",
+            },
+        )
         await self._close_quietly(user.websocket, 4403, "kicked")
         await self._remove_users(room, [target_id], notify=True)
         return True
+
+    async def close_room(self, room_id: str, *, notify_remote: bool = False) -> None:
+        """Shut a room down locally and, optionally, on other instances."""
+        if notify_remote and self._redis is not None:
+            with suppress(Exception):
+                await self._publish(room_id, {"event": {"type": "remote_room_closed"}})
+        room = self.rooms.pop(room_id, None)
+        if room is not None:
+            for user in list(room.users.values()):
+                await self.send_to(user, {"type": "kicked", "reason": "Комната удалена"})
+                await self._close_quietly(user.websocket, 4403, "kicked")
+            room.users.clear()
+            await self._stop_room_tasks(room)
+        await self._delete_room_keys(room_id)
+
+    async def _delete_room_keys(self, room_id: str) -> None:
+        if self._redis is None:
+            return
+        keys = [
+            self._objects_key(room_id),
+            self._workspaces_key(room_id),
+            self._seq_key(room_id),
+            self._presence_key(room_id),
+        ]
+        with suppress(Exception):
+            await self._redis.delete(*keys)
 
     # ------------------------------------------------------------------ sending
 
@@ -884,11 +937,16 @@ class RoomManager:
                 if not isinstance(event, dict):
                     continue
                 if event.get("type") == "remote_kick":
-                    await self._kick_local(room, str(event.get("target", "")))
+                    await self._kick_local(
+                        room, str(event.get("target", "")), reason=event.get("reason")
+                    )
                     continue
                 if event.get("type") == "remote_workspace_pull":
                     await self._handle_remote_pull(room, event)
                     continue
+                if event.get("type") == "remote_room_closed":
+                    await self.close_room(room_id)
+                    return
                 await self._apply_remote_event(room, event)
                 scope = (
                     event.get("workspaceId")

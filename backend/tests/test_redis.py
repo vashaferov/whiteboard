@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import pytest
 from app.config import Settings
 from app.services.room_manager import ConnectedUser, RateLimiter, RoomManager
 from app.services.storage import SnapshotStore
-from fakeredis import FakeAsyncRedis, FakeServer
+from fakeredis import FakeAsyncRedis
 
 
 class FakeWebSocket:
@@ -55,16 +54,6 @@ async def wait_for_hash_field(client, key: str, field: str, timeout: float = 3.0
             return
         await asyncio.sleep(0.02)
     raise AssertionError(f"{field} was not written to {key}")
-
-
-@pytest.fixture
-async def redis_pair():
-    server = FakeServer()
-    first = FakeAsyncRedis(server=server, decode_responses=True)
-    second = FakeAsyncRedis(server=server, decode_responses=True)
-    yield first, second
-    await first.aclose()
-    await second.aclose()
 
 
 def make_manager(

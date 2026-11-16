@@ -16,9 +16,20 @@ if str(BACKEND_DIR) not in sys.path:
 
 from app.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
+from fakeredis import FakeAsyncRedis, FakeServer  # noqa: E402
 from tests.support import ADMIN_LOGIN, ADMIN_PASSWORD, login_session  # noqa: E402
 
 TEACHER_CODE = "secret-code"
+
+
+@pytest.fixture
+async def redis_pair():
+    server = FakeServer()
+    first = FakeAsyncRedis(server=server, decode_responses=True)
+    second = FakeAsyncRedis(server=server, decode_responses=True)
+    yield first, second
+    await first.aclose()
+    await second.aclose()
 
 
 @pytest.fixture

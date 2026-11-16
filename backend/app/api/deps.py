@@ -14,6 +14,8 @@ from app.config import Settings
 from app.services.accounts import AccountStore, User
 from app.services.auth import SESSION_COOKIE, TokenError, TokenPayload, decode_token
 from app.services.images import ImageStorage
+from app.services.room_manager import RoomManager
+from app.services.storage import SnapshotStore
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -28,6 +30,14 @@ def get_image_storage(request: Request) -> ImageStorage:
 
 def get_account_store(request: Request) -> AccountStore:
     return request.app.state.accounts
+
+
+def get_room_manager(request: Request) -> RoomManager:
+    return request.app.state.manager
+
+
+def get_snapshot_store(request: Request) -> SnapshotStore:
+    return request.app.state.store
 
 
 @dataclass(frozen=True, slots=True)

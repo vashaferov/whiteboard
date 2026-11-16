@@ -84,6 +84,51 @@ class AuthResponse(BaseModel):
     board: BoardSize
 
 
+class RoomName(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=80)
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("Название не может быть пустым")
+        return cleaned
+
+
+class RoomCreate(RoomName):
+    pass
+
+
+class RoomRename(RoomName):
+    pass
+
+
+class RoomAccessUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    userIds: list[str] = Field(default_factory=list, max_length=500)
+
+
+class RoomOwner(BaseModel):
+    id: str
+    name: str
+
+
+class RoomInfo(BaseModel):
+    id: str
+    name: str
+    owner: RoomOwner
+
+
+class StudentInfo(BaseModel):
+    id: str
+    name: str
+    login: str
+
+
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
