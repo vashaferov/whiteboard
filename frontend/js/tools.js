@@ -107,6 +107,14 @@ export class ToolManager {
     } else if (STROKE_TOOLS.has(this.tool)) {
       this._startStroke(point);
     } else if (SHAPE_TOOLS.has(this.tool)) {
+      this._connectorStart = null;
+      if (this.tool === 'arrow') {
+        const id = this.board.objectIdAt(point);
+        const data = id ? this.board.getObjectData(id) : null;
+        if (data && data.type === 'shape' && FLOW_SHAPES.has(data.shapeType)) {
+          this._connectorStart = id;
+        }
+      }
       this.shape = { start: point, end: point };
       this._drawShapePreview();
     } else if (this.tool === 'text') {
@@ -256,6 +264,30 @@ export class ToolManager {
 
     const geometry = normalizeShape(this.tool, shape.start, shape.end);
     if (Math.abs(geometry.width) < 3 && Math.abs(geometry.height) < 3) return;
+
+    if (this.tool === 'arrow' && this._connectorStart) {
+      const targetId = this.board.objectIdAt(shape.end);
+      const target = targetId ? this.board.getObjectData(targetId) : null;
+      if (
+        targetId &&
+        targetId !== this._connectorStart &&
+        target &&
+        target.type === 'shape' &&
+        FLOW_SHAPES.has(target.shapeType)
+      ) {
+        this.onEvent({
+          type: 'connector_add',
+          objectId: newId(),
+          fromId: this._connectorStart,
+          toId: targetId,
+          color: this.color,
+          strokeWidth: this.width,
+        });
+        this._connectorStart = null;
+        return;
+      }
+    }
+    this._connectorStart = null;
 
     const id = newId();
     const object = {

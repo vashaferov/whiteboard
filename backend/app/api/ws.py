@@ -15,6 +15,7 @@ from app.models.schemas import (
     ROOM_ID_PATTERN,
     Clear,
     ClientMessage,
+    ConnectorAdd,
     Cursor,
     ImageAdd,
     Kick,
@@ -248,6 +249,8 @@ async def _handle_message(
         await _handle_image_add(manager, room, user, message)
     elif isinstance(message, ObjectUpdate):
         await _handle_object_update(manager, room, user, message)
+    elif isinstance(message, ConnectorAdd):
+        await _handle_connector_add(manager, room, user, message)
     elif isinstance(message, ObjectTransform):
         await _handle_object_transform(manager, room, user, message)
     elif isinstance(message, TextUpdate):
@@ -396,6 +399,58 @@ async def _handle_shape_add(
         {"type": "shape_add", "id": user.id, "object": obj, "workspaceId": user.workspace_id},
         exclude=user.id,
         workspace_id=user.workspace_id,
+    )
+
+
+async def _handle_connector_add(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: ConnectorAdd,
+) -> None:
+    if not await _check_workspace(manager, user, message):
+        return
+    if room.get_object(message.objectId) is not None:
+        return
+    if message.fromId == message.toId:
+        await manager.send_to(
+            user, _error("invalid_message", "Стрелка не может соединять блок с собой")
+        )
+        return
+    for block_id in (message.fromId, message.toId):
+        block = room.get_object(block_id)
+        if (
+            block is None
+            or block.get("workspaceId") != user.workspace_id
+            or block.get("type") != "shape"
+            or block.get("shapeType") not in FLOW_SHAPES
+        ):
+            await manager.send_to(
+                user,
+                _error("invalid_message", "Стрелка соединяет только блоки схемы"),
+            )
+            return
+    if not manager.has_capacity(room):
+        await manager.send_to(user, _error("room_full", "Достигнут лимит объектов на доске"))
+        return
+    obj = _new_object(
+        user,
+        message.objectId,
+        "connector",
+        fromId=message.fromId,
+        toId=message.toId,
+        color=message.color,
+        strokeWidth=message.strokeWidth,
+    )
+    manager.add_object(room, obj, user.workspace_id)
+    await manager.broadcast(
+        room,
+        {
+            "type": "connector_add",
+            "id": user.id,
+            "object": obj,
+            "workspaceId": user.workspace_id,
+        },
     )
 
 
@@ -592,6 +647,18 @@ async def _handle_object_delete(
     if not (is_staff(user.role) or obj.get("author") == user.id):
         await manager.send_to(user, _error("forbidden", "Удалять можно только свои объекты"))
         return
+
+    cascade_ids: list[str] = []
+    if obj.get("type") == "shape" and obj.get("shapeType") in FLOW_SHAPES:
+        for candidate in list(room.objects):
+            if candidate.get("type") == "connector" and (
+                candidate.get("fromId") == message.objectId
+                or candidate.get("toId") == message.objectId
+            ):
+                cascade_ids.append(str(candidate["id"]))
+    for cascade_id in cascade_ids:
+        manager.delete_object(room, cascade_id)
+
     if manager.delete_object(room, message.objectId) is None:
         return
     await manager.broadcast(
@@ -605,6 +672,17 @@ async def _handle_object_delete(
         exclude=user.id,
         workspace_id=user.workspace_id,
     )
+    for cascade_id in cascade_ids:
+        await manager.broadcast(
+            room,
+            {
+                "type": "object_delete",
+                "id": user.id,
+                "objectId": cascade_id,
+                "workspaceId": user.workspace_id,
+            },
+            workspace_id=user.workspace_id,
+        )
 
 
 async def _handle_cursor(

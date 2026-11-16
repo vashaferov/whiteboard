@@ -179,6 +179,9 @@ export class Board {
       case 'image':
         node = this._createImageNode(object);
         break;
+      case 'connector':
+        node = this._createConnectorNode(object);
+        break;
       default:
         return null;
     }
@@ -373,6 +376,95 @@ export class Board {
   }
 
   // Авторитетные данные штриха приходят в stroke_end — заменяем локальные точки.
+  _createConnectorNode(object) {
+    const points = this._connectorPoints(object.fromId, object.toId);
+    if (!points) return null;
+    return new Konva.Arrow({
+      points,
+      stroke: object.color,
+      fill: object.color,
+      strokeWidth: object.strokeWidth,
+      pointerLength: Math.max(8, object.strokeWidth * 3),
+      pointerWidth: Math.max(8, object.strokeWidth * 3),
+      lineCap: 'round',
+      hitStrokeWidth: Math.max(12, object.strokeWidth * 2),
+    });
+  }
+
+  _blockBounds(objectId) {
+    const data = this.objects.get(objectId)?.data;
+    if (!data || data.type !== 'shape' || !FLOW_SHAPES.has(data.shapeType)) {
+      return null;
+    }
+    const width = Math.abs(data.width ?? 0);
+    const height = Math.abs(data.height ?? 0);
+    return {
+      x: data.x,
+      y: data.y,
+      width,
+      height,
+      shapeType: data.shapeType,
+      center: {
+        x: data.x + (data.width ?? 0) / 2,
+        y: data.y + (data.height ?? 0) / 2,
+      },
+    };
+  }
+
+  _edgePoint(bounds, toward) {
+    const dx = toward.x - bounds.center.x;
+    const dy = toward.y - bounds.center.y;
+    if (dx === 0 && dy === 0) return bounds.center;
+    const halfWidth = bounds.width / 2;
+    const halfHeight = bounds.height / 2;
+    let t;
+    if (bounds.shapeType === 'decision') {
+      const denominator =
+        (halfWidth === 0 ? Infinity : Math.abs(dx) / halfWidth) +
+        (halfHeight === 0 ? Infinity : Math.abs(dy) / halfHeight);
+      t = denominator === 0 ? 0 : 1 / denominator;
+    } else {
+      const tx = dx === 0 ? Infinity : halfWidth / Math.abs(dx);
+      const ty = dy === 0 ? Infinity : halfHeight / Math.abs(dy);
+      t = Math.min(tx, ty);
+    }
+    t = Math.min(t, 1);
+    return {
+      x: bounds.center.x + dx * t,
+      y: bounds.center.y + dy * t,
+    };
+  }
+
+  _connectorPoints(fromId, toId) {
+    const from = this._blockBounds(fromId);
+    const to = this._blockBounds(toId);
+    if (!from || !to) return null;
+    const start = this._edgePoint(from, to.center);
+    const end = this._edgePoint(to, from.center);
+    return [start.x, start.y, end.x, end.y];
+  }
+
+  _updateConnectorsFor(blockId) {
+    for (const entry of this.objects.values()) {
+      const data = entry.data;
+      if (data.type !== 'connector') continue;
+      if (data.fromId !== blockId && data.toId !== blockId) continue;
+      const points = this._connectorPoints(data.fromId, data.toId);
+      if (points && entry.node instanceof Konva.Arrow) entry.node.points(points);
+    }
+    this.contentLayer.batchDraw();
+  }
+
+  _updateAllConnectors() {
+    for (const entry of this.objects.values()) {
+      const data = entry.data;
+      if (data.type !== 'connector') continue;
+      const points = this._connectorPoints(data.fromId, data.toId);
+      if (points && entry.node instanceof Konva.Arrow) entry.node.points(points);
+    }
+    this.contentLayer.batchDraw();
+  }
+
   endStroke(objectId, object) {
     const entry = this.objects.get(objectId);
     if (!entry) {
@@ -405,6 +497,12 @@ export class Board {
     if (entry.node instanceof Konva.Group) {
       entry.node.position({ x, y });
       this.contentLayer.batchDraw();
+    }
+    if (
+      entry.data.type === 'shape' &&
+      FLOW_SHAPES.has(entry.data.shapeType)
+    ) {
+      this._updateConnectorsFor(objectId);
     }
   }
 
@@ -440,6 +538,7 @@ export class Board {
     } else if (entry.data.type === 'shape') {
       this._resizeShapeNode(node, entry.data);
       this._applyBlockLabel(node, entry.data);
+      this._updateConnectorsFor(entry.data.id);
     } else if (entry.data.type === 'image') {
       for (const child of node.getChildren()) {
         child.width(entry.data.width);
@@ -545,6 +644,16 @@ export class Board {
   removeObject(objectId) {
     const entry = this.objects.get(objectId);
     if (!entry) return;
+    if (entry.data.type === 'shape' && FLOW_SHAPES.has(entry.data.shapeType)) {
+      for (const [id, item] of [...this.objects]) {
+        if (
+          item.data.type === 'connector' &&
+          (item.data.fromId === objectId || item.data.toId === objectId)
+        ) {
+          this.removeObject(id);
+        }
+      }
+    }
     if (this.selectedId === objectId) this.selectObject(null);
     entry.node.destroy();
     this.objects.delete(objectId);
@@ -561,6 +670,7 @@ export class Board {
   setObjects(objects) {
     this.clearObjects();
     for (const object of objects ?? []) this.addObject(object);
+    this._updateAllConnectors();
     this.contentLayer.batchDraw();
   }
 
@@ -708,10 +818,18 @@ export class Board {
     entry.node.draggable(allowed);
     if (allowed && !entry.dragBound) {
       entry.dragBound = true;
+      entry.node.on('dragmove', () => {
+        if (entry.data.type === 'shape' && FLOW_SHAPES.has(entry.data.shapeType)) {
+          this._updateConnectorsFor(entry.data.id);
+        }
+      });
       entry.node.on('dragend', () => {
         const position = entry.node.position();
         entry.data.x = position.x;
         entry.data.y = position.y;
+        if (entry.data.type === 'shape' && FLOW_SHAPES.has(entry.data.shapeType)) {
+          this._updateConnectorsFor(entry.data.id);
+        }
         this.onObjectMove(entry.data.id, position.x, position.y);
       });
     }

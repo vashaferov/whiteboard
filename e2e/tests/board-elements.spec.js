@@ -254,3 +254,67 @@ test('flowchart: blocks with labels and free arrows', async ({ browser, request 
 
   await context.close();
 });
+
+test('flowchart: connectors follow blocks and disappear with them', async ({ browser, request }) => {
+  const setup = await lessonSetup(request, { name: 'Connectors', student: false });
+  const context = await browser.newContext();
+  const teacher = await context.newPage();
+  await signInWith(request, teacher, setup.teacherLogin);
+  await openRoom(teacher, setup.room.id);
+
+  const drawWithTool = async (tool, from, to) => {
+    await teacher.click(`[data-tool="${tool}"]`);
+    const start = await worldToScreen(teacher, from);
+    const end = await worldToScreen(teacher, to);
+    await teacher.mouse.move(start.x, start.y);
+    await teacher.mouse.down();
+    await teacher.mouse.move(end.x, end.y, { steps: 6 });
+    await teacher.mouse.up();
+  };
+
+  await drawWithTool('process', { x: 200, y: 200 }, { x: 360, y: 300 });
+  await drawWithTool('decision', { x: 520, y: 200 }, { x: 680, y: 320 });
+  await expect.poll(() => objectCount(teacher)).toBe(2);
+
+  await drawWithTool('arrow', { x: 280, y: 250 }, { x: 600, y: 260 });
+  await expect.poll(() => objectCount(teacher)).toBe(3);
+
+  const points = () =>
+    teacher.evaluate(() => {
+      const layer = window.Konva.stages[0].getLayers()[1];
+      const arrow = layer.getChildren((node) => node.getClassName() === 'Arrow')[0];
+      return arrow ? arrow.points() : null;
+    });
+  const before = await points();
+  expect(before).toBeTruthy();
+
+  await reloadAndWait(teacher);
+  await expect.poll(() => objectCount(teacher)).toBe(3);
+  expect(await points()).toBeTruthy();
+
+  await teacher.click('[data-tool="select"]');
+  const start = await worldToScreen(teacher, { x: 280, y: 250 });
+  await teacher.mouse.move(start.x, start.y);
+  await teacher.mouse.down();
+  await teacher.mouse.move(start.x + 80, start.y + 40, { steps: 6 });
+  await teacher.mouse.up();
+
+  await expect
+    .poll(async () => Math.abs((await points())[0] - before[0]))
+    .toBeGreaterThan(20);
+
+  const afterMove = await points();
+  const anchor = await transformerAnchor(teacher, 'bottom-right');
+  await dragBy(teacher, anchor, 40, 30);
+  await expect
+    .poll(async () => JSON.stringify(await points()))
+    .not.toBe(JSON.stringify(afterMove));
+
+  await teacher.keyboard.press('Delete');
+  await expect.poll(() => objectCount(teacher)).toBe(1);
+
+  await drawWithTool('arrow', { x: 250, y: 520 }, { x: 420, y: 620 });
+  await expect.poll(() => objectCount(teacher)).toBe(2);
+
+  await context.close();
+});

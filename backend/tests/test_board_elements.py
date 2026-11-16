@@ -24,6 +24,16 @@ def barrier(websocket) -> list[dict]:
         messages.append(message)
 
 
+def drain_until(websocket, type_name: str) -> list[dict]:
+    """Read messages until ``type_name``; the marker itself is not returned."""
+    messages: list[dict] = []
+    while True:
+        message = websocket.receive_json()
+        if message["type"] == type_name:
+            return messages
+        messages.append(message)
+
+
 def codes(messages: list[dict]) -> list[str]:
     return [message["code"] for message in messages if message["type"] == "error"]
 
@@ -134,3 +144,70 @@ def test_flow_block_rotation_is_zero(client: TestClient, login_user) -> None:
         )
         transforms = [m for m in barrier(student_ws) if m["type"] == "object_transform"]
         assert transforms and transforms[0]["object"]["rotation"] == 0
+
+
+def connector(object_id: str, from_id: str, to_id: str) -> dict:
+    return {
+        "type": "connector_add",
+        "objectId": object_id,
+        "fromId": from_id,
+        "toId": to_id,
+        "color": "#2563eb",
+        "strokeWidth": 4,
+    }
+
+
+def test_connector_between_flow_blocks(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+
+    with (
+        ws_connect(client, teacher["token"]) as teacher_ws,
+        ws_connect(client, student["token"]) as student_ws,
+    ):
+        teacher_ws.receive_json()
+        student_ws.receive_json()
+        teacher_ws.receive_json()
+
+        teacher_ws.send_json({**shape("flow-a"), "shapeType": "process"})
+        assert recv_until(student_ws, "shape_add")["object"]["id"] == "flow-a"
+        teacher_ws.send_json({**shape("flow-b"), "shapeType": "decision"})
+        assert recv_until(student_ws, "shape_add")["object"]["id"] == "flow-b"
+
+        teacher_ws.send_json(connector("arrow-1", "flow-a", "flow-b"))
+        assert "invalid_message" not in codes(barrier(teacher_ws))
+        messages = barrier(student_ws)
+        added = [m for m in messages if m["type"] == "connector_add"]
+        assert added
+        assert added[0]["object"]["fromId"] == "flow-a"
+        assert added[0]["object"]["toId"] == "flow-b"
+
+        teacher_ws.send_json(connector("arrow-2", "flow-a", "missing"))
+        teacher_ws.send_json({"type": "workspace_switch", "workspaceId": "ws_default"})
+        invalid = drain_until(teacher_ws, "workspace_state")
+        assert "invalid_message" in codes(invalid)
+
+
+def test_deleting_block_removes_its_connectors(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+
+    with (
+        ws_connect(client, teacher["token"]) as teacher_ws,
+        ws_connect(client, student["token"]) as student_ws,
+    ):
+        teacher_ws.receive_json()
+        student_ws.receive_json()
+        teacher_ws.receive_json()
+
+        teacher_ws.send_json({**shape("flow-a"), "shapeType": "process"})
+        recv_until(student_ws, "shape_add")
+        teacher_ws.send_json({**shape("flow-b"), "shapeType": "terminator"})
+        recv_until(student_ws, "shape_add")
+        teacher_ws.send_json(connector("arrow-1", "flow-a", "flow-b"))
+        assert [m for m in barrier(student_ws) if m["type"] == "connector_add"]
+
+        teacher_ws.send_json({"type": "object_delete", "objectId": "flow-a"})
+        barrier(teacher_ws)
+        messages = barrier(student_ws)
+        assert set(deleted(messages)) == {"flow-a", "arrow-1"}

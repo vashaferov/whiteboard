@@ -563,3 +563,33 @@ async def test_purge_room_keys_removes_only_room_state(
     assert await manager.purge_room_keys() == 2
     assert await first_redis.get("whiteboard:keep") == "keep"
     assert await first_redis.keys("whiteboard:room:*") == []
+
+
+async def test_connector_add_is_shared(settings, tmp_path, redis_pair) -> None:
+    first_redis, second_redis = redis_pair
+    manager_a = make_manager(settings, tmp_path, "conn-a", first_redis)
+    manager_b = make_manager(settings, tmp_path, "conn-b", second_redis)
+    room_a = await manager_a.get_or_create("room-conn")
+    room_b = await manager_b.get_or_create("room-conn")
+
+    obj = {
+        "id": "c1",
+        "type": "connector",
+        "author": "u",
+        "workspaceId": "ws_default",
+        "fromId": "a",
+        "toId": "b",
+        "color": "#2563eb",
+        "strokeWidth": 4,
+    }
+    manager_a.add_object(room_a, obj, "ws_default")
+    await manager_a.broadcast(
+        room_a,
+        {"type": "connector_add", "id": "u", "object": obj, "workspaceId": "ws_default"},
+    )
+
+    await wait_for(lambda: room_b.get_object("c1") is not None)
+    assert room_b.get_object("c1")["fromId"] == "a"
+
+    await manager_a.shutdown()
+    await manager_b.shutdown()

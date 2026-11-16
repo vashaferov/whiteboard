@@ -712,6 +712,7 @@ function handleServerEvent(message) {
     case 'shape_add':
     case 'text_add':
     case 'image_add':
+    case 'connector_add':
     case 'object_update':
     case 'object_transform':
     case 'text_update':
@@ -784,6 +785,7 @@ function applyObjectEvent(message) {
     case 'shape_add':
     case 'text_add':
     case 'image_add':
+    case 'connector_add':
       board.addObject(message.object);
       break;
     case 'object_update':

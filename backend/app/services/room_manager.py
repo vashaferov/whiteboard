@@ -31,7 +31,7 @@ from app.services.workspaces import (
 
 logger = logging.getLogger(__name__)
 
-ADD_EVENTS = {"shape_add", "text_add", "image_add", "stroke_end"}
+ADD_EVENTS = {"shape_add", "text_add", "image_add", "stroke_end", "connector_add"}
 OBJECT_EVENTS = {"object_transform", "text_update"}
 
 # Events whose delivery is filtered by the recipient's current workspace. Room-level
@@ -43,6 +43,7 @@ WORKSPACE_SCOPED_EVENTS = {
     "shape_add",
     "text_add",
     "image_add",
+    "connector_add",
     "object_update",
     "object_transform",
     "text_update",

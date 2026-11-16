@@ -238,6 +238,15 @@ class ObjectUpdate(_Message):
     y: float = Field(ge=COORD_MIN, le=COORD_MAX)
 
 
+class ConnectorAdd(_Message):
+    type: Literal["connector_add"]
+    objectId: str = Field(pattern=OBJECT_ID_PATTERN)
+    fromId: str = Field(pattern=OBJECT_ID_PATTERN)
+    toId: str = Field(pattern=OBJECT_ID_PATTERN)
+    color: str = Field(pattern=COLOR_PATTERN)
+    strokeWidth: float = Field(ge=1, le=200)
+
+
 class ObjectTransform(_Message):
     type: Literal["object_transform"]
     objectId: str = Field(pattern=OBJECT_ID_PATTERN)
@@ -357,6 +366,7 @@ ClientMessage = Annotated[
     | TextAdd
     | ImageAdd
     | ObjectUpdate
+    | ConnectorAdd
     | ObjectTransform
     | TextUpdate
     | ObjectDelete
