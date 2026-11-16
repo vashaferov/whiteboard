@@ -5,9 +5,13 @@ import {
   createPage,
   deletePage,
   drawRect,
-  login,
+  grantAccess,
+  lessonSetup,
+  makeActiveStudent,
   movePage,
   objectCount,
+  openLesson,
+  openRoom,
   pageNames,
   pullAll,
   pullSelected,
@@ -15,19 +19,21 @@ import {
   renamePage,
   selectPage,
   selectStudent,
-  uniqueRoom,
+  signInWith,
+  uniqueLogin,
   worldToScreen,
 } from '../helpers.js';
 
-test('workspaces: create, isolate, switch, rename, reorder, reload', async ({ browser }) => {
-  const room = uniqueRoom('ws');
-  const teacherContext = await browser.newContext();
-  const studentContext = await browser.newContext();
-  const teacher = await teacherContext.newPage();
-  const student = await studentContext.newPage();
-
-  await login(teacher, { name: 'Учитель', role: 'teacher', room });
-  await login(student, { name: 'Ученик', role: 'student', room });
+test('workspaces: create, isolate, switch, rename, reorder, reload', async ({
+  browser,
+  request,
+}) => {
+  const setup = await lessonSetup(request, { name: 'Pages' });
+  const { teacherContext, studentContext, teacher, student } = await openLesson(
+    request,
+    browser,
+    setup,
+  );
 
   expect(await pageNames(student)).toEqual(['Страница 1']);
   await createPage(teacher, 'Вторая');
@@ -55,8 +61,8 @@ test('workspaces: create, isolate, switch, rename, reorder, reload', async ({ br
   await studentContext.close();
 });
 
-test('workspaces: socket reconnect keeps the current page', async ({ browser }) => {
-  const room = uniqueRoom('ws-reconnect');
+test('workspaces: socket reconnect keeps the current page', async ({ browser, request }) => {
+  const setup = await lessonSetup(request, { name: 'Pages reconnect' });
   const teacherContext = await browser.newContext();
   const studentContext = await browser.newContext();
   const teacher = await teacherContext.newPage();
@@ -72,8 +78,10 @@ test('workspaces: socket reconnect keeps the current page', async ({ browser }) 
     server.onMessage((message) => socket.send(message));
   });
 
-  await login(teacher, { name: 'Учитель', role: 'teacher', room });
-  await login(student, { name: 'Ученик', role: 'student', room });
+  await signInWith(request, teacher, setup.teacherLogin);
+  await openRoom(teacher, setup.room.id);
+  await signInWith(request, student, setup.studentLogin);
+  await openRoom(student, setup.room.id);
 
   await createPage(teacher, 'Вторая');
   await expect.poll(() => pageNames(student)).toEqual(['Страница 1', 'Вторая']);
@@ -90,8 +98,11 @@ test('workspaces: socket reconnect keeps the current page', async ({ browser }) 
   await studentContext.close();
 });
 
-test('workspaces: switching to a deleted page recovers the board', async ({ browser }) => {
-  const room = uniqueRoom('ws-abort');
+test('workspaces: switching to a deleted page recovers the board', async ({
+  browser,
+  request,
+}) => {
+  const setup = await lessonSetup(request, { name: 'Pages abort' });
   const teacherContext = await browser.newContext();
   const studentContext = await browser.newContext();
   const teacher = await teacherContext.newPage();
@@ -112,8 +123,10 @@ test('workspaces: switching to a deleted page recovers the board', async ({ brow
     server.onMessage((message) => socket.send(message));
   });
 
-  await login(teacher, { name: 'Учитель', role: 'teacher', room });
-  await login(student, { name: 'Ученик', role: 'student', room });
+  await signInWith(request, teacher, setup.teacherLogin);
+  await openRoom(teacher, setup.room.id);
+  await signInWith(request, student, setup.studentLogin);
+  await openRoom(student, setup.room.id);
 
   await createPage(teacher, 'Вторая');
   await expect.poll(() => pageNames(student)).toEqual(['Страница 1', 'Вторая']);
@@ -136,15 +149,14 @@ test('workspaces: switching to a deleted page recovers the board', async ({ brow
 
 test('workspaces: deleting a non-empty page discards objects and moves viewers', async ({
   browser,
+  request,
 }) => {
-  const room = uniqueRoom('ws-del');
-  const teacherContext = await browser.newContext();
-  const studentContext = await browser.newContext();
-  const teacher = await teacherContext.newPage();
-  const student = await studentContext.newPage();
-
-  await login(teacher, { name: 'Учитель', role: 'teacher', room });
-  await login(student, { name: 'Ученик', role: 'student', room });
+  const setup = await lessonSetup(request, { name: 'Pages delete' });
+  const { teacherContext, studentContext, teacher, student } = await openLesson(
+    request,
+    browser,
+    setup,
+  );
 
   await createPage(teacher, 'Вторая');
   await expect.poll(() => pageNames(student)).toEqual(['Страница 1', 'Вторая']);
@@ -178,8 +190,12 @@ test('workspaces: deleting a non-empty page discards objects and moves viewers',
   await studentContext.close();
 });
 
-test('pull one and all students to the teacher page', async ({ browser }) => {
-  const room = uniqueRoom('pull');
+test('pull one and all students to the teacher page', async ({ browser, request }) => {
+  const setup = await lessonSetup(request, { name: 'Pull', studentName: 'Первый' });
+  const secondLogin = uniqueLogin('student');
+  await makeActiveStudent(request, { login: secondLogin, name: 'Второй' });
+  await grantAccess(request, setup.room.id, setup.teacherLogin, secondLogin);
+
   const teacherContext = await browser.newContext();
   const studentContext = await browser.newContext();
   const secondContext = await browser.newContext();
@@ -187,9 +203,12 @@ test('pull one and all students to the teacher page', async ({ browser }) => {
   const student = await studentContext.newPage();
   const second = await secondContext.newPage();
 
-  await login(teacher, { name: 'Учитель', role: 'teacher', room });
-  await login(student, { name: 'Первый', role: 'student', room });
-  await login(second, { name: 'Второй', role: 'student', room });
+  await signInWith(request, teacher, setup.teacherLogin);
+  await openRoom(teacher, setup.room.id);
+  await signInWith(request, student, setup.studentLogin);
+  await openRoom(student, setup.room.id);
+  await signInWith(request, second, secondLogin);
+  await openRoom(second, setup.room.id);
 
   await createPage(teacher, 'Вторая');
   await selectStudent(teacher, 'Первый');
@@ -206,15 +225,13 @@ test('pull one and all students to the teacher page', async ({ browser }) => {
   await secondContext.close();
 });
 
-test('pull preserves a text draft on the old page', async ({ browser }) => {
-  const room = uniqueRoom('draft');
-  const teacherContext = await browser.newContext();
-  const studentContext = await browser.newContext();
-  const teacher = await teacherContext.newPage();
-  const student = await studentContext.newPage();
-
-  await login(teacher, { name: 'Учитель', role: 'teacher', room });
-  await login(student, { name: 'Ученик', role: 'student', room });
+test('pull preserves a text draft on the old page', async ({ browser, request }) => {
+  const setup = await lessonSetup(request, { name: 'Draft' });
+  const { teacherContext, studentContext, teacher, student } = await openLesson(
+    request,
+    browser,
+    setup,
+  );
 
   await createPage(teacher, 'Вторая');
   await student.click('[data-tool="text"]');

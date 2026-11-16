@@ -74,8 +74,14 @@ export async function grantAccess(request, roomId, teacherLogin, studentLogin) {
   const students = await response.json();
   const student = students.find((item) => item.login === studentLogin);
   if (!student) throw new Error(`student ${studentLogin} was not found`);
+
+  const current = await request.get(`/api/rooms/${roomId}/access`);
+  expect(current.ok()).toBeTruthy();
+  const userIds = (await current.json()).map((item) => item.id);
+  if (!userIds.includes(student.id)) userIds.push(student.id);
+
   const updated = await request.put(`/api/rooms/${roomId}/access`, {
-    data: { userIds: [student.id] },
+    data: { userIds },
   });
   expect(updated.ok()).toBeTruthy();
 }
@@ -92,20 +98,36 @@ export async function openRoom(page, roomId) {
   await expect(page.locator('#status')).toHaveText('Подключено', { timeout: 15_000 });
 }
 
-export function uniqueRoom(prefix = 'e2e') {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+export async function lessonSetup(
+  request,
+  { teacherName = 'Учитель', studentName = 'Ученик', name = 'Комната', student = true } = {},
+) {
+  const teacherLogin = uniqueLogin('teacher');
+  await makeTeacher(request, { login: teacherLogin, name: teacherName });
+
+  let studentLogin = null;
+  if (student) {
+    studentLogin = uniqueLogin('student');
+    await makeActiveStudent(request, { login: studentLogin, name: studentName });
+  }
+
+  const room = await createRoom(request, teacherLogin, name);
+  if (studentLogin) {
+    await grantAccess(request, room.id, teacherLogin, studentLogin);
+  }
+  return { teacherLogin, studentLogin, room };
 }
 
-export async function login(page, { name, role = 'student', room }) {
-  await page.goto(`/?room=${encodeURIComponent(room)}`);
-  await page.fill('input[name="name"]', name);
-  if (role === 'teacher') {
-    await page.selectOption('select[name="role"]', 'teacher');
-    await page.fill('input[name="code"]', TEACHER_CODE);
-  }
-  await page.click('#login-submit');
-  await expect(page.locator('#status')).toHaveText('Подключено', { timeout: 15_000 });
-  await expect(page.locator('#app')).toBeVisible();
+export async function openLesson(request, browser, setup) {
+  const teacherContext = await browser.newContext();
+  const studentContext = await browser.newContext();
+  const teacher = await teacherContext.newPage();
+  const student = await studentContext.newPage();
+  await signInWith(request, teacher, setup.teacherLogin);
+  await openRoom(teacher, setup.room.id);
+  await signInWith(request, student, setup.studentLogin);
+  await openRoom(student, setup.room.id);
+  return { teacherContext, studentContext, teacher, student };
 }
 
 export async function boardBox(page) {

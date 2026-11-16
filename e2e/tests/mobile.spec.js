@@ -5,19 +5,22 @@ import {
   boardBox,
   createPage,
   drawRect,
-  login,
+  lessonSetup,
   objectCount,
+  openRoom,
   selectPage,
   selectedShape,
-  uniqueRoom,
+  signInWith,
   worldToScreen,
 } from '../helpers.js';
 
 test('mobile: toolbar is usable and drawing works on a phone viewport', async ({
   page,
+  request,
 }) => {
-  const room = uniqueRoom('mobile');
-  await login(page, { name: 'Учитель', role: 'teacher', room });
+  const setup = await lessonSetup(request, { name: 'Mobile', student: false });
+  await signInWith(request, page, setup.teacherLogin);
+  await openRoom(page, setup.room.id);
 
   // Pages panel is visible as a horizontal strip and the first page is active.
   await expect(page.locator('#pages-panel')).toBeVisible();

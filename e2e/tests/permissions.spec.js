@@ -1,25 +1,31 @@
 import { expect, test } from '@playwright/test';
 
 import {
+  ADMIN_LOGIN,
+  ADMIN_PASSWORD,
+  collectErrors,
   drawRect,
   firstObjectId,
-  login,
+  lessonSetup,
   objectCount,
+  openLesson,
+  openRoom,
   selectObject,
-  uniqueRoom,
+  signInWith,
   waitForObjectCount,
 } from '../helpers.js';
+
 test('permissions: student cannot delete or clear, teacher can clear and kick', async ({
   browser,
+  request,
 }) => {
-  const room = uniqueRoom('perm');
-  const teacherContext = await browser.newContext();
-  const studentContext = await browser.newContext();
-  const teacher = await teacherContext.newPage();
-  const student = await studentContext.newPage();
-
-  await login(teacher, { name: 'Учитель', role: 'teacher', room });
-  await login(student, { name: 'Ученик', role: 'student', room });
+  const setup = await lessonSetup(request, { name: 'Permissions' });
+  const { teacherContext, studentContext, teacher, student } = await openLesson(
+    request,
+    browser,
+    setup,
+  );
+  const errors = [...collectErrors(teacher, 'teacher'), ...collectErrors(student, 'student')];
 
   await drawRect(teacher, { x: 250, y: 250 }, { x: 420, y: 360 });
   await waitForObjectCount(student, 1);
@@ -39,13 +45,41 @@ test('permissions: student cannot delete or clear, teacher can clear and kick', 
   await waitForObjectCount(teacher, 0);
   await waitForObjectCount(student, 0);
 
-  // The teacher kicks the student; the student returns to the login screen.
+  // The teacher kicks the student; the student returns to the dashboard.
   await expect(teacher.locator('.user__kick')).toHaveCount(1);
   teacher.once('dialog', (dialog) => dialog.accept());
   await teacher.click('.user__kick');
-  await expect(student.locator('#login')).toBeVisible({ timeout: 15_000 });
+  await expect(student.locator('#dashboard')).toBeVisible({ timeout: 15_000 });
   await expect(student.locator('#app')).toBeHidden();
+
+  expect(errors).toEqual([]);
 
   await teacherContext.close();
   await studentContext.close();
+});
+
+test('permissions: admin has teacher powers in a foreign room', async ({ browser, request }) => {
+  const setup = await lessonSetup(request, { name: 'Admin powers' });
+  const { teacherContext, studentContext, teacher, student } = await openLesson(
+    request,
+    browser,
+    setup,
+  );
+
+  const adminContext = await browser.newContext();
+  const admin = await adminContext.newPage();
+  await signInWith(request, admin, ADMIN_LOGIN, ADMIN_PASSWORD);
+  await openRoom(admin, setup.room.id);
+
+  await drawRect(teacher, { x: 250, y: 250 }, { x: 420, y: 360 });
+  await waitForObjectCount(student, 1);
+
+  await admin.once('dialog', (dialog) => dialog.accept());
+  await admin.click('#clear-btn');
+  await waitForObjectCount(teacher, 0);
+  await waitForObjectCount(student, 0);
+
+  await teacherContext.close();
+  await studentContext.close();
+  await adminContext.close();
 });
