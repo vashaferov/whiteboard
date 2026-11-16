@@ -363,10 +363,8 @@ function renderAdminUsers(users) {
           () => patchUser(user, { status: blocked ? "active" : "blocked" }),
         ),
       );
-      actions.appendChild(
-        button("Пароль", "admin-user__password", () => resetPassword(user)),
-      );
     }
+    actions.appendChild(button("Пароль", "admin-user__password", () => resetPassword(user)));
     item.appendChild(actions);
     els.adminUsers.appendChild(item);
   }

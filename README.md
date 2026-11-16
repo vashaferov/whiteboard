@@ -78,7 +78,7 @@ cd backend
 | `SESSION_TTL_HOURS` | `12` | Время жизни cookie-сессии |
 | `COOKIE_SECURE` | `false` | Ставить `Secure` на cookie (обязательно `true` в проде с HTTPS) |
 | `PASSWORD_ROUNDS` | `12` | bcrypt cost (в тестах/E2E — 4) |
-| `AUTH_LOGIN_PER_MINUTE` / `AUTH_REGISTER_PER_MINUTE` | `10` / `5` | Лимит попыток входа/регистрации с одного IP |
+| `AUTH_LOGIN_PER_MINUTE` / `AUTH_REGISTER_PER_MINUTE` | `10` / `5` | Лимит неудачных попыток входа / регистраций с одного IP |
 | `BOARD_WIDTH` / `BOARD_HEIGHT` | `1600` / `900` | Логический размер доски |
 | `MAX_UPLOAD_MB` | `5` | Лимит размера изображения |
 | `ROOM_TTL_DAYS` | `30` | Срок хранения снимков комнат |

@@ -75,6 +75,16 @@ def test_wrong_origin_is_rejected(client, activate_user) -> None:
     assert response.json()["detail"]["code"] == "bad_origin"
 
 
+def test_successful_logins_do_not_consume_throttle(client, app, activate_user) -> None:
+    register(client, "anna")
+    activate_user("anna")
+    app.state.login_limiter = WindowLimiter(limit=2, window_seconds=60)
+
+    for _ in range(3):
+        response = client.post("/api/login", json={"login": "anna", "password": PASSWORD})
+        assert response.status_code == 200
+
+
 def test_wrong_password_and_login_throttle(client, app, activate_user) -> None:
     register(client, "anna")
     activate_user("anna")

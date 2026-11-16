@@ -24,6 +24,9 @@ test('admin: approves, promotes, blocks and resets passwords', async ({ browser,
   await registerUser(request, { login, name: 'Управляемый' });
 
   const { context, page } = await adminPage(browser, request);
+  const adminRow = page.locator('.admin-user', { hasText: ADMIN_LOGIN });
+  await expect(adminRow.locator('.admin-user__password')).toBeVisible();
+
   const row = page.locator('.admin-user', { hasText: login });
   await expect(row.locator('.admin-user__status')).toHaveText('На рассмотрении');
 
