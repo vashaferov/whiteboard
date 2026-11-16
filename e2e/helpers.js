@@ -1,6 +1,64 @@
 import { expect } from '@playwright/test';
 
-export const TEACHER_CODE = process.env.E2E_TEACHER_CODE || 'e2e-code';
+export const ADMIN_LOGIN = process.env.ADMIN_LOGIN || 'e2e-admin';
+export const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'e2e-admin-pass';
+export const DEFAULT_PASSWORD = 'secret-1';
+
+export function uniqueLogin(prefix = 'user') {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+export async function registerUser(request, { login, name, password = DEFAULT_PASSWORD }) {
+  const response = await request.post('/api/register', {
+    data: { login, name, password },
+  });
+  expect(response.status()).toBe(201);
+}
+
+export async function apiLogin(request, login, password = DEFAULT_PASSWORD) {
+  const response = await request.post('/api/login', {
+    data: { login, password },
+  });
+  expect(response.ok()).toBeTruthy();
+  return response;
+}
+
+export async function adminLogin(request) {
+  return apiLogin(request, ADMIN_LOGIN, ADMIN_PASSWORD);
+}
+
+export async function findAdminUser(request, login) {
+  await adminLogin(request);
+  const response = await request.get(`/api/admin/users?q=${encodeURIComponent(login)}`);
+  expect(response.ok()).toBeTruthy();
+  const users = await response.json();
+  return users.find((item) => item.login === login);
+}
+
+export async function approveUser(request, login, { role } = {}) {
+  const user = await findAdminUser(request, login);
+  if (!user) throw new Error(`user ${login} was not found`);
+  const patch = { status: 'active' };
+  if (role) patch.role = role;
+  const response = await request.patch(`/api/admin/users/${user.id}`, { data: patch });
+  expect(response.ok()).toBeTruthy();
+}
+
+export async function makeActiveStudent(request, { login, name }) {
+  await registerUser(request, { login, name });
+  await approveUser(request, login);
+}
+
+export async function makeTeacher(request, { login, name }) {
+  await registerUser(request, { login, name });
+  await approveUser(request, login, { role: 'teacher' });
+}
+
+export async function signInWith(request, page, login, password = DEFAULT_PASSWORD) {
+  await apiLogin(request, login, password);
+  const state = await request.storageState();
+  await page.context().addCookies(state.cookies);
+}
 
 export function uniqueRoom(prefix = 'e2e') {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;

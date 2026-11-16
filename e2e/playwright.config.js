@@ -43,8 +43,9 @@ export default defineConfig({
         cwd: path.resolve(__dirname, '../backend'),
         env: {
           ...process.env,
-          JWT_SECRET: 'e2e-secret-0123456789abcdef0123456789',
-          TEACHER_CODE: 'e2e-code',
+          ADMIN_LOGIN: 'e2e-admin',
+          ADMIN_PASSWORD: 'e2e-admin-pass',
+          PASSWORD_ROUNDS: '4',
           DATA_DIR: path.resolve(__dirname, '.data'),
           UPLOADS_DIR: path.resolve(__dirname, '.uploads'),
           FRONTEND_DIR: path.resolve(__dirname, '../frontend'),

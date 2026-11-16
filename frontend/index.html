@@ -10,53 +10,103 @@
     <script type="module" src="/js/main.js" defer></script>
   </head>
   <body>
-    <!-- Экран входа -->
-    <div id="login" class="login">
-      <form id="login-form" class="login__card">
+    <!-- Вход и регистрация -->
+    <div id="auth" class="login" hidden>
+      <div class="login__card">
         <div class="login__brand">
           <span class="logo">Д</span>
           <div>
             <h1>Онлайн-доска</h1>
-            <p>Совместный урок в реальном времени</p>
+            <p>Уроки в реальном времени</p>
           </div>
         </div>
 
-        <label class="field">
-          <span>Ваше имя</span>
-          <input name="name" maxlength="40" autocomplete="name" placeholder="Анна" required />
-        </label>
+        <div class="auth__tabs" role="tablist">
+          <button id="auth-tab-login" class="auth__tab is-active" type="button" role="tab">Вход</button>
+          <button id="auth-tab-register" class="auth__tab" type="button" role="tab">Регистрация</button>
+        </div>
 
-        <label class="field">
-          <span>Комната</span>
-          <input
-            name="room"
-            maxlength="64"
-            pattern="[A-Za-z0-9_\-]{1,64}"
-            title="Латинские буквы, цифры, дефис и подчёркивание"
-            placeholder="math-7b"
-            required
-          />
-        </label>
+        <form id="auth-form" class="auth__form">
+          <label class="field" id="auth-name-field" hidden>
+            <span>Имя</span>
+            <input name="name" maxlength="40" autocomplete="name" placeholder="Анна" />
+          </label>
 
-        <label class="field">
-          <span>Роль</span>
-          <select name="role">
-            <option value="student">Ученик</option>
-            <option value="teacher">Учитель</option>
-          </select>
-        </label>
+          <label class="field">
+            <span>Логин</span>
+            <input
+              name="login"
+              maxlength="32"
+              pattern="[A-Za-z0-9_.\-]{3,32}"
+              autocomplete="username"
+              placeholder="anna"
+              required
+            />
+          </label>
 
-        <label class="field" id="code-field" hidden>
-          <span>Код учителя</span>
-          <input name="code" autocomplete="off" placeholder="Введите код" />
-        </label>
+          <label class="field">
+            <span>Пароль</span>
+            <input
+              name="password"
+              type="password"
+              minlength="8"
+              maxlength="72"
+              autocomplete="current-password"
+              placeholder="Не менее 8 символов"
+              required
+            />
+          </label>
 
-        <button type="submit" id="login-submit" class="btn btn--primary btn--wide">Войти в урок</button>
-        <p id="login-error" class="login__error" role="alert"></p>
-        <p class="login__hint">
-          Поделитесь ссылкой вида <code>/?room=math-7b</code> — ученики откроют её без кода.
-        </p>
-      </form>
+          <button id="auth-submit" class="btn btn--primary btn--wide" type="submit">Войти</button>
+          <p id="auth-error" class="login__error" role="alert"></p>
+        </form>
+      </div>
+    </div>
+
+    <!-- Статус заявки -->
+    <div id="status-screen" class="login" hidden>
+      <div class="login__card">
+        <div class="login__brand">
+          <span class="logo">Д</span>
+          <div>
+            <h1>Онлайн-доска</h1>
+          </div>
+        </div>
+        <p id="status-text" class="status-screen__text"></p>
+        <button id="status-back" class="btn btn--ghost btn--wide" type="button">
+          Вернуться ко входу
+        </button>
+      </div>
+    </div>
+
+    <!-- Дашборд -->
+    <div id="dashboard" class="dashboard" hidden>
+      <header class="dashboard__header">
+        <div class="dashboard__brand">
+          <span class="logo logo--small">Д</span>
+          <span class="toolbar__title">Онлайн-доска</span>
+        </div>
+        <div class="dashboard__user">
+          <span id="dash-name"></span>
+          <span id="dash-role" class="badge"></span>
+        </div>
+        <button id="logout-btn" class="btn btn--ghost" type="button">Выйти</button>
+      </header>
+
+      <main class="dashboard__main">
+        <section class="dashboard__section">
+          <div class="dashboard__toolbar">
+            <h2 class="dashboard__title">Комнаты</h2>
+            <button id="create-room" class="btn btn--primary" type="button" hidden>
+              Создать комнату
+            </button>
+          </div>
+          <ul id="dash-rooms" class="room-list"></ul>
+          <p id="dash-empty" class="dashboard__empty" hidden></p>
+        </section>
+
+        <section id="dash-admin" class="dashboard__section dashboard__section--admin" hidden></section>
+      </main>
     </div>
 
     <!-- Рабочее пространство -->

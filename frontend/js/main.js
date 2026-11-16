@@ -4,9 +4,11 @@ import { Board } from './board.js';
 import { ToolManager } from './tools.js';
 import { SyncClient } from './sync.js';
 import { PagesPanel } from './pages.js';
+import { authApi } from './api.js';
+import { initAuth, showAuth } from './auth.js';
+import { initDashboard, showDashboard } from './dashboard.js';
 
 const SESSION_KEY = 'wb:session';
-const NAME_KEY = 'wb:name';
 const DEFAULT_BOARD = { width: 1600, height: 900 };
 const PALETTE = ['#111827', '#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777'];
 const TOOL_KEYS = {
@@ -51,6 +53,7 @@ const state = {
   stateVersion: 0,
   selectedStudentIds: new Set(),
   moveRequestId: null,
+  boardSize: DEFAULT_BOARD,
 };
 
 const els = {};
@@ -92,33 +95,46 @@ function clearSession() {
 function init() {
   cacheElements();
   buildPalette();
-  bindLogin();
   bindToolbar();
   bindTextEditor();
   bindKeyboard();
   bindWindowEvents();
-  prefillLogin();
+  initAuth({ onAuthenticated: startApp });
+  initDashboard({
+    onOpenRoom: (roomId) => {
+      window.location.href = `/?room=${encodeURIComponent(roomId)}`;
+    },
+    onLogout: logout,
+  });
+  boot();
+}
 
-  const session = loadSession();
-  const queryRoom = new URLSearchParams(window.location.search).get('room');
-  if (session?.token && session.roomId && (!queryRoom || queryRoom === session.roomId)) {
-    startSession(session);
-  } else {
-    showLogin();
+async function boot() {
+  try {
+    startApp(await authApi.me());
+  } catch {
+    showAuth();
   }
 }
 
-function cacheElements() {
-  els.login = $('#login');
-  els.loginForm = $('#login-form');
-  els.loginError = $('#login-error');
-  els.loginSubmit = $('#login-submit');
-  els.codeField = $('#code-field');
-  els.nameInput = els.loginForm.elements.name;
-  els.roomInput = els.loginForm.elements.room;
-  els.roleSelect = els.loginForm.elements.role;
-  els.codeInput = els.loginForm.elements.code;
+function startApp(me) {
+  state.user = me.user;
+  state.permissions = me.permissions;
+  state.boardSize = me.board || DEFAULT_BOARD;
+  showDashboard({ user: me.user, permissions: me.permissions });
+}
 
+async function logout() {
+  try {
+    await authApi.logout();
+  } catch {
+    /* сессия уже могла истечь */
+  }
+  state.user = null;
+  showAuth();
+}
+
+function cacheElements() {
   els.app = $('#app');
   els.board = $('#board');
   els.pagesPanel = $('#pages-panel');
@@ -142,72 +158,6 @@ function cacheElements() {
   els.toast = $('#toast');
 }
 
-function prefillLogin() {
-  const session = loadSession();
-  const queryRoom = new URLSearchParams(window.location.search).get('room');
-  els.nameInput.value = localStorage.getItem(NAME_KEY) || '';
-  if (queryRoom) els.roomInput.value = queryRoom;
-  else if (session?.roomId) els.roomInput.value = session.roomId;
-}
-
-function showLogin(message = '') {
-  els.login.hidden = false;
-  els.app.hidden = true;
-  els.loginError.textContent = message;
-  if (!els.roomInput.value) prefillLogin();
-  els.nameInput.focus();
-}
-
-// --------------------------------------------------------------------- login
-
-function bindLogin() {
-  els.roleSelect.addEventListener('change', () => {
-    const isTeacher = els.roleSelect.value === 'teacher';
-    els.codeField.hidden = !isTeacher;
-    els.codeInput.required = isTeacher;
-  });
-
-  els.loginForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const name = els.nameInput.value.trim();
-    const roomId = els.roomInput.value.trim();
-    const role = els.roleSelect.value;
-    const code = els.codeInput.value;
-
-    if (!name || !roomId) {
-      els.loginError.textContent = 'Укажите имя и код комнаты';
-      return;
-    }
-
-    els.loginError.textContent = '';
-    els.loginSubmit.disabled = true;
-    try {
-      const response = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          roomId,
-          role,
-          code: role === 'teacher' ? code : undefined,
-        }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        els.loginError.textContent = data.detail || 'Не удалось войти в урок';
-        return;
-      }
-      localStorage.setItem(NAME_KEY, name);
-      saveSession(data);
-      startSession(data);
-    } catch {
-      els.loginError.textContent = 'Сервер недоступен. Попробуйте ещё раз.';
-    } finally {
-      els.loginSubmit.disabled = false;
-    }
-  });
-}
-
 function startSession(session) {
   state.token = session.token;
   state.roomId = session.roomId;
@@ -223,10 +173,11 @@ function startSession(session) {
   state.selectedStudentIds = new Set();
   state.moveRequestId = null;
 
-  els.login.hidden = true;
+  $('#auth').hidden = true;
+  $('#status-screen').hidden = true;
+  $('#dashboard').hidden = true;
   els.app.hidden = false;
-  els.roomLabel.textContent = session.roomId;
-  els.usersHint.textContent = '';
+  els.roomLabel.textContent = session.roomId;  els.usersHint.textContent = '';
   history.replaceState(null, '', `?room=${encodeURIComponent(session.roomId)}`);
 
   state.board = new Board(els.board, {
@@ -317,7 +268,7 @@ function leaveLesson(message = '') {
   els.textEditor.value = '';
   els.app.hidden = true;
   els.clearBtn.hidden = true;
-  showLogin(message);
+  showAuth(message);
   history.replaceState(null, '', window.location.pathname);
 }
 
