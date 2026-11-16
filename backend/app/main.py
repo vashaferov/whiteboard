@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import accounts, rooms, upload, ws
+from app.api import accounts, admin, rooms, upload, ws
 from app.config import Settings, get_settings
 from app.services import metrics
 from app.services.accounts import AccountStore
@@ -124,6 +124,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(accounts.router)
+    app.include_router(admin.router)
     app.include_router(rooms.router)
     app.include_router(upload.router)
     app.include_router(ws.router)

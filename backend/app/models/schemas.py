@@ -129,6 +129,41 @@ class StudentInfo(BaseModel):
     login: str
 
 
+class AdminUser(BaseModel):
+    id: str
+    login: str
+    name: str
+    role: str
+    status: str
+    createdAt: str
+
+
+class AdminUserPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["active", "blocked", "rejected"] | None = None
+    role: Literal["student", "teacher"] | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one(self) -> AdminUserPatch:
+        if self.status is None and self.role is None:
+            raise ValueError("Укажите статус или роль")
+        return self
+
+
+class AdminPasswordReset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("password")
+    @classmethod
+    def _password_bytes(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Пароль не длиннее 72 байт")
+        return value
+
+
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
