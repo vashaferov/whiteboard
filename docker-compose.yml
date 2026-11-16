@@ -4,9 +4,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-please-use-32-bytes}
-      TEACHER_CODE: ${TEACHER_CODE:-teacher}
-      JWT_TTL_HOURS: ${JWT_TTL_HOURS:-12}
+      ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin-change-me}
+      ADMIN_NAME: ${ADMIN_NAME:-Администратор}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      COOKIE_SECURE: "false"
       REDIS_URL: redis://redis:6379/0
       S3_BUCKET: ${S3_BUCKET:-whiteboard}
       S3_ENDPOINT_URL: http://s3:8333

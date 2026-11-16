@@ -33,8 +33,9 @@ cp .env.example .env
 
 | Переменная | Значение |
 |---|---|
-| `JWT_SECRET` | случайная строка ≥ 32 байт: `openssl rand -hex 32` |
-| `TEACHER_CODE` | код учителя, не `teacher` |
+| `ADMIN_PASSWORD` | надёжный пароль bootstrap-администратора (или смените его в админке) |
+| `COOKIE_SECURE` | `true` (сессионная cookie только по HTTPS; в prod-compose так по умолчанию) |
+| `SESSION_TTL_HOURS` | `12` (время жизни сессии) |
 | `DOMAIN` | ваш домен (для Caddy и публичных URL) |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | ключи SeaweedFS (или внешнего S3), не значения по умолчанию |
 | `SENTRY_DSN` | DSN проекта Sentry (необязательно) |

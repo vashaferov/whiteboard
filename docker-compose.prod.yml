@@ -27,6 +27,8 @@ services:
       DATA_DIR: /app/data
       UPLOADS_DIR: /app/uploads
       FRONTEND_DIR: /app/frontend
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
       REDIS_URL: redis://redis:6379/0
       S3_BUCKET: ${S3_BUCKET:-whiteboard}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://s3:8333}
