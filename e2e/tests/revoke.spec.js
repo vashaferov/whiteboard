@@ -22,6 +22,7 @@ test('access: revoking kicks the student and hides the room', async ({ browser, 
   const card = teacher.locator('.room-card', { hasText: setup.room.name });
   await card.locator('.room-card__access').click();
   await expect(teacher.locator('#access-dialog')).toBeVisible();
+  await teacher.fill('#access-search', setup.studentLogin);
 
   const row = teacher.locator('#access-list .access-item', {
     hasText: setup.studentLogin,

@@ -32,7 +32,6 @@ const FATAL_MESSAGES = {
 };
 
 const state = {
-  token: null,
   roomId: null,
   user: null,
   users: new Map(),
@@ -415,12 +414,12 @@ async function uploadImage(event) {
     form.append('file', file);
     const response = await fetch('/api/upload', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${state.token}` },
       body: form,
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      toast(data.detail || 'Не удалось загрузить изображение');
+      const detail = data.detail;
+      toast(typeof detail === 'string' ? detail : detail?.message || 'Не удалось загрузить изображение');
       return;
     }
 
