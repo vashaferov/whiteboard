@@ -20,6 +20,9 @@ const TOOL_KEYS = {
   a: 'arrow',
   t: 'text',
   v: 'select',
+  p: 'process',
+  d: 'decision',
+  s: 'terminator',
 };
 const FATAL_MESSAGES = {
   unauthorized: 'Сессия истекла — войдите снова',
@@ -513,8 +516,7 @@ function openTextEditor(point) {
 
 function openTextEditorForObject(object) {
   if (!state.board || !state.user || !object) return;
-  const canEdit =
-    state.user.role === 'teacher' || object.author === state.user.id;
+  const canEdit = isStaff(state.user.role) || object.author === state.user.id;
   if (!canEdit) {
     toast('Редактировать можно только свои тексты');
     return;

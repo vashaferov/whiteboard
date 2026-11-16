@@ -49,6 +49,7 @@ router = APIRouter()
 
 MAX_POINTS_PER_STROKE = 20000
 MAX_ACTIVE_STROKES = 8
+FLOW_SHAPES = {"process", "decision", "terminator"}
 
 
 def _error(code: str, message: str) -> dict[str, str]:
@@ -520,6 +521,8 @@ async def _handle_object_transform(
         if message.fontSize is not None:
             fields["fontSize"] = message.fontSize
     else:
+        if obj.get("type") == "shape" and obj.get("shapeType") in FLOW_SHAPES:
+            fields["rotation"] = 0
         if message.width is not None and message.width != 0:
             fields["width"] = message.width
         if message.height is not None and message.height != 0:
@@ -550,7 +553,8 @@ async def _handle_text_update(
     obj = await _check_object_workspace(manager, room, user, message)
     if obj is None:
         return
-    if obj.get("type") != "text":
+    is_block = obj.get("type") == "shape" and obj.get("shapeType") in FLOW_SHAPES
+    if obj.get("type") != "text" and not is_block:
         await manager.send_to(user, _error("not_text", "Объект не является текстом"))
         return
     if not _can_edit_object(user, obj):

@@ -80,3 +80,57 @@ def test_student_deletes_own_object_but_not_teachers(client: TestClient, login_u
     with ws_connect(client, observer["token"]) as observer_ws:
         init = observer_ws.receive_json()
         assert [obj["id"] for obj in init["objects"]] == ["teacher-shape"]
+
+
+def test_flow_block_accepts_label(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+
+    with (
+        ws_connect(client, teacher["token"]) as teacher_ws,
+        ws_connect(client, student["token"]) as student_ws,
+    ):
+        teacher_ws.receive_json()
+        student_ws.receive_json()
+        teacher_ws.receive_json()
+
+        teacher_ws.send_json({**shape("flow-1"), "shapeType": "process"})
+        assert "invalid_message" not in codes(barrier(teacher_ws))
+        created = [m for m in barrier(student_ws) if m["type"] == "shape_add"]
+        assert created and created[0]["object"]["shapeType"] == "process"
+
+        teacher_ws.send_json({"type": "text_update", "objectId": "flow-1", "content": "Старт"})
+        assert "not_text" not in codes(barrier(teacher_ws))
+        updates = [m for m in barrier(student_ws) if m["type"] == "text_update"]
+        assert updates and updates[0]["object"]["content"] == "Старт"
+
+
+def test_flow_block_rotation_is_zero(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+
+    with (
+        ws_connect(client, teacher["token"]) as teacher_ws,
+        ws_connect(client, student["token"]) as student_ws,
+    ):
+        teacher_ws.receive_json()
+        student_ws.receive_json()
+        teacher_ws.receive_json()
+
+        teacher_ws.send_json({**shape("flow-2"), "shapeType": "decision"})
+        assert "invalid_message" not in codes(barrier(teacher_ws))
+        assert [m for m in barrier(student_ws) if m["type"] == "shape_add"]
+
+        teacher_ws.send_json(
+            {
+                "type": "object_transform",
+                "objectId": "flow-2",
+                "x": 10,
+                "y": 10,
+                "width": 60,
+                "height": 40,
+                "rotation": 45,
+            }
+        )
+        transforms = [m for m in barrier(student_ws) if m["type"] == "object_transform"]
+        assert transforms and transforms[0]["object"]["rotation"] == 0

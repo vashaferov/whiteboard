@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 
 import {
   clickWorld,
+  dblclickWorld,
+  dragBy,
   drawRect,
   lessonSetup,
   objectCount,
@@ -9,6 +11,7 @@ import {
   openRoom,
   reloadAndWait,
   signInWith,
+  transformerAnchor,
   waitForObjectCount,
   worldToScreen,
 } from '../helpers.js';
@@ -193,4 +196,61 @@ test('eraser: a student cannot erase foreign objects', async ({ browser, request
 
   await teacherContext.close();
   await studentContext.close();
+});
+
+test('flowchart: blocks with labels and free arrows', async ({ browser, request }) => {
+  const setup = await lessonSetup(request, { name: 'Flow', student: false });
+  const context = await browser.newContext();
+  const teacher = await context.newPage();
+  await signInWith(request, teacher, setup.teacherLogin);
+  await openRoom(teacher, setup.room.id);
+
+  const drawBlock = async (tool, from, to) => {
+    await teacher.click(`[data-tool="${tool}"]`);
+    const start = await worldToScreen(teacher, from);
+    const end = await worldToScreen(teacher, to);
+    await teacher.mouse.move(start.x, start.y);
+    await teacher.mouse.down();
+    await teacher.mouse.move(end.x, end.y, { steps: 6 });
+    await teacher.mouse.up();
+  };
+
+  await drawBlock('process', { x: 180, y: 180 }, { x: 340, y: 280 });
+  await drawBlock('decision', { x: 420, y: 180 }, { x: 580, y: 300 });
+  await drawBlock('terminator', { x: 660, y: 180 }, { x: 820, y: 260 });
+  await expect.poll(() => objectCount(teacher)).toBe(3);
+
+  await teacher.click('[data-tool="select"]');
+  await dblclickWorld(teacher, { x: 260, y: 230 });
+  await expect(teacher.locator('#text-editor')).toBeVisible();
+  await teacher.fill('#text-editor', 'Процесс');
+  await teacher.press('#text-editor', 'Enter');
+
+  const hasLabel = () =>
+    teacher.evaluate(
+      () =>
+        window.Konva.stages[0]
+          .getLayers()[1]
+          .getChildren((node) => Boolean(node.id()))
+          .some((node) => node.findOne('Text')?.text() === 'Процесс'),
+    );
+  await expect.poll(hasLabel).toBe(true);
+
+  const rotateEnabled = () =>
+    teacher.evaluate(() =>
+      window.Konva.stages[0].getLayers()[1].findOne('Transformer').rotateEnabled(),
+    );
+  await expect.poll(rotateEnabled).toBe(false);
+
+  const anchor = await transformerAnchor(teacher, 'bottom-right');
+  await dragBy(teacher, anchor, 60, 40);
+
+  await drawBlock('arrow', { x: 180, y: 420 }, { x: 380, y: 520 });
+  await expect.poll(() => objectCount(teacher)).toBe(4);
+
+  await reloadAndWait(teacher);
+  await expect.poll(() => objectCount(teacher)).toBe(4);
+  await expect.poll(hasLabel).toBe(true);
+
+  await context.close();
 });

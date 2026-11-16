@@ -201,7 +201,7 @@ class StrokeEnd(_Message):
 class ShapeAdd(_Message):
     type: Literal["shape_add"]
     objectId: str = Field(pattern=OBJECT_ID_PATTERN)
-    shapeType: Literal["rect", "circle", "line", "arrow"]
+    shapeType: Literal["rect", "circle", "line", "arrow", "process", "decision", "terminator"]
     x: float = Field(ge=COORD_MIN, le=COORD_MAX)
     y: float = Field(ge=COORD_MIN, le=COORD_MAX)
     width: float = Field(ge=COORD_MIN, le=COORD_MAX)

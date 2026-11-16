@@ -4,7 +4,16 @@
  */
 
 const STROKE_TOOLS = new Set(['brush']);
-const SHAPE_TOOLS = new Set(['rect', 'circle', 'line', 'arrow']);
+const SHAPE_TOOLS = new Set([
+  'rect',
+  'circle',
+  'line',
+  'arrow',
+  'process',
+  'decision',
+  'terminator',
+]);
+const FLOW_SHAPES = new Set(['process', 'decision', 'terminator']);
 const ERASER_RADIUS_MIN = 10;
 const POINT_THROTTLE_MS = 16;
 
@@ -14,7 +23,7 @@ function newId() {
 }
 
 function normalizeShape(tool, start, end) {
-  if (tool === 'rect' || tool === 'circle') {
+  if (tool === 'rect' || tool === 'circle' || FLOW_SHAPES.has(tool)) {
     return {
       x: Math.min(start.x, end.x),
       y: Math.min(start.y, end.y),

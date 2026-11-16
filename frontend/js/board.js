@@ -5,6 +5,7 @@
 
 const FONT_FAMILY = 'Inter, "Segoe UI", Roboto, Arial, sans-serif';
 const MIN_SCALE = 0.1;
+const FLOW_SHAPES = new Set(['process', 'decision', 'terminator']);
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -218,13 +219,15 @@ export class Board {
     const { shapeType, x, y, width, height, color, strokeWidth } = object;
     const fill = object.fill || undefined;
     const group = new Konva.Group({ x, y, rotation: object.rotation || 0 });
+    const absWidth = Math.abs(width);
+    const absHeight = Math.abs(height);
     let shape;
-    if (shapeType === 'rect') {
+    if (shapeType === 'rect' || shapeType === 'process') {
       shape = new Konva.Rect({
         x: 0,
         y: 0,
-        width,
-        height,
+        width: absWidth,
+        height: absHeight,
         stroke: color,
         strokeWidth,
         fill,
@@ -250,6 +253,34 @@ export class Board {
         pointerWidth: Math.max(8, strokeWidth * 3),
         lineCap: 'round',
       });
+    } else if (shapeType === 'decision') {
+      shape = new Konva.Line({
+        points: [
+          absWidth / 2,
+          0,
+          absWidth,
+          absHeight / 2,
+          absWidth / 2,
+          absHeight,
+          0,
+          absHeight / 2,
+        ],
+        closed: true,
+        stroke: color,
+        strokeWidth,
+        fill,
+      });
+    } else if (shapeType === 'terminator') {
+      shape = new Konva.Rect({
+        x: 0,
+        y: 0,
+        width: absWidth,
+        height: absHeight,
+        stroke: color,
+        strokeWidth,
+        fill,
+        cornerRadius: Math.min(absWidth, absHeight) / 2,
+      });
     } else {
       shape = new Konva.Line({
         points: [0, 0, width, height],
@@ -259,7 +290,27 @@ export class Board {
       });
     }
     group.add(shape);
+    if (FLOW_SHAPES.has(shapeType)) {
+      group.add(this._createBlockLabel(object, width, height));
+    }
     return group;
+  }
+
+  _createBlockLabel(object, width, height) {
+    return new Konva.Text({
+      x: 6,
+      y: 0,
+      width: Math.max(0, Math.abs(width) - 12),
+      height: Math.abs(height),
+      text: object.content || '',
+      fill: '#0f172a',
+      fontSize: object.fontSize || 16,
+      fontFamily: FONT_FAMILY,
+      align: 'center',
+      verticalAlign: 'middle',
+      wrap: 'word',
+      listening: false,
+    });
   }
 
   _createTextNode(object) {
@@ -388,6 +439,7 @@ export class Board {
       }
     } else if (entry.data.type === 'shape') {
       this._resizeShapeNode(node, entry.data);
+      this._applyBlockLabel(node, entry.data);
     } else if (entry.data.type === 'image') {
       for (const child of node.getChildren()) {
         child.width(entry.data.width);
@@ -402,6 +454,30 @@ export class Board {
     if (!shape) return;
     const width = data.width ?? 0;
     const height = data.height ?? 0;
+
+    if (FLOW_SHAPES.has(data.shapeType)) {
+      const absWidth = Math.abs(width);
+      const absHeight = Math.abs(height);
+      if (data.shapeType === 'decision' && shape instanceof Konva.Line) {
+        shape.points([
+          absWidth / 2,
+          0,
+          absWidth,
+          absHeight / 2,
+          absWidth / 2,
+          absHeight,
+          0,
+          absHeight / 2,
+        ]);
+      } else if (shape instanceof Konva.Rect) {
+        shape.width(absWidth);
+        shape.height(absHeight);
+        if (data.shapeType === 'terminator') {
+          shape.cornerRadius(Math.min(absWidth, absHeight) / 2);
+        }
+      }
+      return;
+    }
 
     if (shape instanceof Konva.Rect) {
       shape.width(Math.abs(width));
@@ -419,6 +495,18 @@ export class Board {
     } else if (shape instanceof Konva.Line) {
       shape.points([0, 0, width, height]);
     }
+  }
+
+  _applyBlockLabel(node, data) {
+    if (!FLOW_SHAPES.has(data.shapeType)) return;
+    const label = node.findOne('Text');
+    if (!label) return;
+    const width = Math.abs(data.width ?? 0);
+    const height = Math.abs(data.height ?? 0);
+    label.position({ x: 6, y: 0 });
+    label.width(Math.max(0, width - 12));
+    label.height(height);
+    if (data.content !== undefined) label.text(data.content);
   }
 
   _bindTransform(entry) {
@@ -488,9 +576,11 @@ export class Board {
     this.selectedId = objectId;
     const entry = objectId ? this.objects.get(objectId) : null;
     if (entry) {
-      const transformable = entry.data.type !== 'stroke';
+      const data = entry.data;
+      const isBlock = data.type === 'shape' && FLOW_SHAPES.has(data.shapeType);
+      const transformable = data.type !== 'stroke' && data.type !== 'connector';
       this.transformer.resizeEnabled(transformable);
-      this.transformer.rotateEnabled(transformable);
+      this.transformer.rotateEnabled(transformable && !isBlock && data.type !== 'frame');
       this.transformer.nodes([entry.node]);
       this.transformer.moveToTop();
       this.transformer.forceUpdate();
@@ -634,7 +724,11 @@ export class Board {
     while (node && node !== this.stage && !node.id()) node = node.getParent();
     if (!node || node === this.stage) return;
     const entry = this.objects.get(node.id());
-    if (!entry || entry.data.type !== 'text') return;
+    if (!entry) return;
+    const isText = entry.data.type === 'text';
+    const isBlock =
+      entry.data.type === 'shape' && FLOW_SHAPES.has(entry.data.shapeType);
+    if (!isText && !isBlock) return;
     if (!this.editPredicate(entry.data, entry.node)) return;
     event.evt?.preventDefault?.();
     this.selectObject(entry.data.id);
