@@ -169,12 +169,12 @@ CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 - `POST /api/register {login, name, password}` → 201 `{status: "pending"}`;
   занятый логин → 409 `{detail: {code: "login_taken", message: ...}}`.
-- `POST /api/login {login, password}` → 200 `{user, permissions}` + `Set-Cookie: wb_session=...`;
+- `POST /api/login {login, password}` → 200 `{user, permissions, board}` + `Set-Cookie: wb_session=...`;
   неверная пара → 401 `invalid_credentials`; `pending`/`rejected`/`blocked` → 403 с
   `detail.code` = `pending` / `rejected` / `blocked` и человекочитаемым текстом (cookie не
   ставится).
 - `POST /api/logout` → 204, сессия удаляется из БД, cookie стирается.
-- `GET /api/me` → 200 `{user, permissions}` или 401; используется при загрузке SPA и после
+- `GET /api/me` → 200 `{user, permissions, board}` или 401; используется при загрузке SPA и после
   переподключения.
 - Cookie: имя `wb_session`, `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` из настройки
   `COOKIE_SECURE` (в проде `true`), `Max-Age = SESSION_TTL_HOURS` (по умолчанию 12).
@@ -238,7 +238,7 @@ CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   Порядок: сначала рассылка и закрытие, затем удаление строки комнаты, доступов, снимка и
   ключей Redis. Даже если гонка сохранит снимок после удаления, комната уже недоступна (нет
   строки `rooms`), а снимок вычистится по `ROOM_TTL_DAYS`.
-- `GET /api/rooms/{id}/access` — владелец или админ: `[{user: {id, name, login}}]`.
+- `GET /api/rooms/{id}/access` — владелец или админ: `[{id, name, login}]`.
 - `PUT /api/rooms/{id}/access {userIds: [...]}` — владелец или админ; полная замена списка;
   неактивные/несуществующие id → 400 `invalid_user`; добавленные получают доступ сразу,
   удалённые — выкидываются из комнаты (если были внутри) с причиной «Учитель отменил доступ
@@ -318,7 +318,8 @@ CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 Удаляются: `TEACHER_CODE`, `JWT_SECRET`, `JWT_TTL_HOURS`. Добавляются:
 `ADMIN_LOGIN`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `SESSION_TTL_HOURS=12`, `COOKIE_SECURE=false`
-(в проде `true`). Обновляются `.env.example`, `docker-compose.yml`/`docker-compose.prod.yml`,
+(в проде `true`), `PASSWORD_ROUNDS=12` (в тестах понижается до 4, чтобы bcrypt не замедлял
+набор). Обновляются `.env.example`, `docker-compose.yml`/`docker-compose.prod.yml`,
 `docs/deploy.md`, README, CI (E2E-окружение задаёт `ADMIN_LOGIN`/`ADMIN_PASSWORD`).
 `scripts/load_test.py` удаляется, упоминания в README/plan/CI убираются.
 
