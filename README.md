@@ -15,6 +15,10 @@
 - Загрузка изображений через `POST /api/upload` (локально или в S3-совместимом хранилище).
 - Курсоры участников с троттлингом.
 - Очистка доски, удаление объектов и отключение участника — только учитель.
+- Несколько страниц (воркспейсов) в комнате: список видят все, каждый переключается сам.
+- Учитель создаёт, переименовывает, удаляет и меняет порядок страниц; переносит одного,
+  нескольких или всех учеников на свою текущую страницу. Черновик текста сохраняется на
+  старой странице.
 - Синхронизация в реальном времени: append-only + last-write-wins.
 - Переподключение с exponential backoff и восстановлением снимка через `init`.
 - Снимки доски в SQLite: периодически и при опустении комнаты; восстановление после рестарта.
@@ -68,6 +72,8 @@ cd backend
 | `MAX_UPLOAD_MB` | `5` | Лимит размера изображения |
 | `ROOM_TTL_DAYS` | `30` | Срок хранения снимков комнат |
 | `MAX_OBJECTS_PER_ROOM` | `20000` | Лимит объектов на доске |
+| `MAX_WORKSPACES_PER_ROOM` | `50` | Лимит страниц (воркспейсов) в комнате |
+| `WORKSPACE_MOVE_TIMEOUT_SECONDS` | `2.0` | Ожидание ack при переносе ученика учителем |
 | `RATE_LIMIT_*` | 60 / 25 / 40 | Лимиты `stroke_point`, `cursor`, прочих сообщений в секунду |
 | `DATA_DIR` / `UPLOADS_DIR` / `FRONTEND_DIR` | папки в корне | Пути к данным, загрузкам и статике |
 | `REDIS_URL` | пусто | Включает общее состояние комнат и Pub/Sub; без него — один инстанс |
@@ -89,22 +95,26 @@ backend/
     api/{auth,ws,upload}.py # логин, WebSocket, загрузка файлов
     services/
       auth.py               # JWT
-      room_manager.py       # комнаты, участники, broadcast, rate limit, Redis
+      room_manager.py       # комнаты, участники, broadcast, rate limit, Redis, воркспейсы
+      workspaces.py         # страницы: id, имена, порядок, миграция
       storage.py            # SQLite-снимки
       images.py             # локальное и S3-хранилище изображений
       metrics.py            # Prometheus-метрики
       logging.py            # JSON-логи, request-id, Sentry
-  tests/                    # unit + integration (52 теста)
+  tests/                    # unit + integration (105 тестов)
 frontend/
   index.html
   js/{main,board,tools,sync}.js
+  js/pages.js               # панель страниц
   css/style.css
-e2e/                        # Playwright: урок, права, reconnect, mobile
+e2e/                        # Playwright: урок, права, reconnect, страницы/перенос, mobile
 scripts/
   load_test.py              # нагрузка на WebSocket
   backup.py                 # бэкап SQLite + uploads
   backup-docker.sh          # бэкап named volumes production-стека
 docs/deploy.md              # production-деплой, TLS, бэкапы, метрики
+docs/superpowers/specs/2026-11-15-workspaces-design.md  # дизайн страниц
+docs/superpowers/plans/2026-11-15-workspaces.md         # план реализации страниц
 Caddyfile
 Dockerfile
 docker-compose.yml          # dev: whiteboard + Redis + SeaweedFS
@@ -114,16 +124,21 @@ docker-compose.prod.yml     # prod: Caddy + whiteboard + Redis + SeaweedFS
 
 ## Протокол WebSocket (кратко)
 
-`/ws/{room_id}?token=<JWT>` — после подключения сервер присылает `init`
-(участники, объекты, права, размер доски), затем транслирует события всем, кроме отправителя.
+`/ws/{room_id}?token=<JWT>&workspace=<id>` — после подключения сервер присылает `init`
+(участники, страницы, текущая страница, объекты только этой страницы, права, размер доски),
+затем транслирует события всем, кроме отправителя. `workspace` необязателен: без него
+открывается первая страница.
 
 Клиент → сервер: `stroke_start`, `stroke_point`, `stroke_end`, `shape_add`, `text_add`,
 `image_add`, `object_update`, `object_transform`, `text_update`, `object_delete`,
-`cursor`, `clear`, `kick`.
+`cursor`, `clear`, `kick`, `workspace_switch`, `workspace_create`, `workspace_rename`,
+`workspace_delete`, `workspace_reorder`, `workspace_pull`, `workspace_move_ack`.
 
 Сервер → клиент: `init`, `user_joined`, `user_left`, `stroke_*`, `shape_add`, `text_add`,
 `image_add`, `object_update`, `object_transform`, `text_update`, `object_delete`,
-`cursor`, `clear`, `error`, `kicked`.
+`cursor`, `cursor_remove`, `workspace_state`, `workspace_created`, `workspace_renamed`,
+`workspace_reordered`, `workspace_deleted`, `workspace_prepare_move`, `workspace_moved`,
+`clear`, `error`, `kicked`.
 
 Дополнительно к исходной архитектуре:
 
@@ -134,6 +149,16 @@ docker-compose.prod.yml     # prod: Caddy + whiteboard + Redis + SeaweedFS
 - `stroke_end` несёт полный объект штриха, чтобы опоздавшие и переподключившиеся
   клиенты не теряли линию.
 - `seq` присваивается сервером при финализации объекта.
+- `workspaceId` есть у каждого объектного, курсорного и `clear`-события; сервер доставляет
+  такое событие только участникам этой страницы.
+- `workspace_state` — `{workspaceId, objects, stateVersion}`: снимок страницы после
+  переключения; применяется только более новый `stateVersion`.
+- `workspace_prepare_move` → `workspace_move_ack` → `workspace_moved` + `workspace_state` —
+  двухфазный перенос: клиент сохраняет черновик текста и финализирует штрих, затем
+  подтверждает; если ack не пришёл за `WORKSPACE_MOVE_TIMEOUT_SECONDS`, перенос выполняется
+  принудительно.
+- Первая страница — `ws_default` («Страница 1»); старые комнаты и снимки мигрируют в неё без
+  потери объектов. Лимит объектов и `seq` остаются общими на комнату.
 
 ## Тесты и линтеры
 
@@ -148,7 +173,9 @@ cd backend
 broadcast, права (`clear`, удаление, перемещение, transform, текст), штрихи,
 курсоры/лимиты, kick, восстановление снимка, Redis Pub/Sub и presence на
 `fakeredis`, метрики/readiness/JSON-логи, edge cases (размер upload, обрыв во
-время штриха, одновременное рисование, невалидные сообщения).
+время штриха, одновременное рисование, невалидные сообщения), страницы
+(создание/переименование/удаление/порядок, изоляция объектов, двухфазный перенос,
+миграция старых снимков).
 
 E2E в репозитории (Playwright, Chromium):
 
@@ -161,7 +188,9 @@ npx playwright test
 ```
 
 Сценарии: основной урок (рисование, курсор, resize/rotate, текст и его
-редактирование, reload), права и kick, reconnect, мобильный viewport.
+редактирование, reload), права и kick, reconnect, страницы (создание, изоляция,
+переключение, переименование, порядок, reload, reconnect, удаление цели
+переключения), перенос учеников (один/все, сохранение черновика), мобильный viewport.
 
 Нагрузочный тест:
 
