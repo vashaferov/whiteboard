@@ -125,6 +125,13 @@ class SnapshotStore:
     async def delete_older_than(self, days: int) -> int:
         return await asyncio.to_thread(self._delete_older_than_sync, days)
 
+    async def delete(self, room_id: str) -> None:
+        await asyncio.to_thread(self._delete_sync, room_id)
+
+    def _delete_sync(self, room_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM room_snapshots WHERE room_id = ?", (room_id,))
+
     def _delete_older_than_sync(self, days: int) -> int:
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
         with self._connect() as conn:

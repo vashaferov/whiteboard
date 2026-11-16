@@ -39,6 +39,23 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions(user_id);
 
+CREATE TABLE IF NOT EXISTS rooms (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    owner_id   TEXT NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS rooms_owner_idx ON rooms(owner_id);
+
+CREATE TABLE IF NOT EXISTS room_access (
+    room_id    TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    granted_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (room_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -61,6 +78,32 @@ class User:
     status: str
     color: str
     created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class Room:
+    id: str
+    name: str
+    owner_id: str
+    owner_name: str
+    created_at: str
+
+
+_ROOM_SELECT = """
+SELECT rooms.id, rooms.name, rooms.owner_id, users.name AS owner_name, rooms.created_at
+FROM rooms
+JOIN users ON users.id = rooms.owner_id
+"""
+
+
+def _row_to_room(row: sqlite3.Row) -> Room:
+    return Room(
+        id=str(row["id"]),
+        name=str(row["name"]),
+        owner_id=str(row["owner_id"]),
+        owner_name=str(row["owner_name"]),
+        created_at=str(row["created_at"]),
+    )
 
 
 def _now() -> str:
@@ -88,8 +131,24 @@ class AccountStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.legacy_wiped = False
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            self._migrate_legacy(conn)
+
+    def _migrate_legacy(self, conn: sqlite3.Connection) -> None:
+        """Wipe pre-accounts room snapshots exactly once."""
+        marker = conn.execute("SELECT value FROM app_meta WHERE key = 'accounts_v1'").fetchone()
+        if marker is not None:
+            return
+        tables = {
+            str(row[0])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        if "room_snapshots" in tables:
+            conn.execute("DELETE FROM room_snapshots")
+        conn.execute("INSERT INTO app_meta (key, value) VALUES ('accounts_v1', ?)", (_now(),))
+        self.legacy_wiped = True
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=10)
@@ -312,6 +371,162 @@ class AccountStore:
         if cursor.rowcount == 0:
             return None
         return self._get_user_sync(user_id)
+
+    # ------------------------------------------------------------------ rooms
+
+    async def create_room(self, *, owner_id: str, name: str, room_id: str | None = None) -> Room:
+        return await asyncio.to_thread(self._create_room_sync, owner_id, name, room_id)
+
+    def _create_room_sync(self, owner_id: str, name: str, room_id: str | None) -> Room:
+        if room_id is None:
+            room_id = f"r_{uuid.uuid4().hex[:16]}"
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO rooms (id, name, owner_id, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (room_id, name.strip(), owner_id, now, now),
+            )
+        room = self._get_room_sync(room_id)
+        assert room is not None
+        return room
+
+    async def get_room(self, room_id: str) -> Room | None:
+        return await asyncio.to_thread(self._get_room_sync, room_id)
+
+    def _get_room_sync(self, room_id: str) -> Room | None:
+        with self._connect() as conn:
+            row = conn.execute(f"{_ROOM_SELECT} WHERE rooms.id = ?", (room_id,)).fetchone()
+        return _row_to_room(row) if row is not None else None
+
+    async def list_owned_rooms(self, owner_id: str) -> list[Room]:
+        return await asyncio.to_thread(self._list_owned_rooms_sync, owner_id)
+
+    def _list_owned_rooms_sync(self, owner_id: str) -> list[Room]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"{_ROOM_SELECT} WHERE rooms.owner_id = ? " "ORDER BY rooms.created_at, rooms.id",
+                (owner_id,),
+            ).fetchall()
+        return [_row_to_room(row) for row in rows]
+
+    async def list_rooms_for_student(self, user_id: str) -> list[Room]:
+        return await asyncio.to_thread(self._list_rooms_for_student_sync, user_id)
+
+    def _list_rooms_for_student_sync(self, user_id: str) -> list[Room]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"{_ROOM_SELECT} JOIN room_access ON room_access.room_id = rooms.id "
+                "WHERE room_access.user_id = ? ORDER BY rooms.created_at, rooms.id",
+                (user_id,),
+            ).fetchall()
+        return [_row_to_room(row) for row in rows]
+
+    async def list_all_rooms(self) -> list[Room]:
+        return await asyncio.to_thread(self._list_all_rooms_sync)
+
+    def _list_all_rooms_sync(self) -> list[Room]:
+        with self._connect() as conn:
+            rows = conn.execute(f"{_ROOM_SELECT} ORDER BY rooms.created_at, rooms.id").fetchall()
+        return [_row_to_room(row) for row in rows]
+
+    async def list_room_ids(self) -> list[str]:
+        return await asyncio.to_thread(self._list_room_ids_sync)
+
+    def _list_room_ids_sync(self) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT id FROM rooms ORDER BY id").fetchall()
+        return [str(row[0]) for row in rows]
+
+    async def rename_room(self, room_id: str, name: str) -> Room | None:
+        return await asyncio.to_thread(self._rename_room_sync, room_id, name)
+
+    def _rename_room_sync(self, room_id: str, name: str) -> Room | None:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE rooms SET name = ?, updated_at = ? WHERE id = ?",
+                (name.strip(), _now(), room_id),
+            )
+        if cursor.rowcount == 0:
+            return None
+        return self._get_room_sync(room_id)
+
+    async def delete_room(self, room_id: str) -> bool:
+        return await asyncio.to_thread(self._delete_room_sync, room_id)
+
+    def _delete_room_sync(self, room_id: str) -> bool:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM room_access WHERE room_id = ?", (room_id,))
+            cursor = conn.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
+        return cursor.rowcount > 0
+
+    async def list_room_access(self, room_id: str) -> list[User]:
+        return await asyncio.to_thread(self._list_room_access_sync, room_id)
+
+    def _room_access_rows(self, conn: sqlite3.Connection, room_id: str) -> list[sqlite3.Row]:
+        return conn.execute(
+            """
+            SELECT users.id, users.login, users.name, users.role, users.status,
+                   users.color, users.created_at
+            FROM room_access
+            JOIN users ON users.id = room_access.user_id
+            WHERE room_access.room_id = ?
+            ORDER BY users.login
+            """,
+            (room_id,),
+        ).fetchall()
+
+    def _list_room_access_sync(self, room_id: str) -> list[User]:
+        with self._connect() as conn:
+            rows = self._room_access_rows(conn, room_id)
+        return [_row_to_user(row) for row in rows]
+
+    async def set_room_access(
+        self, room_id: str, user_ids: list[str], granted_by: str
+    ) -> tuple[list[User], set[str], set[str]]:
+        return await asyncio.to_thread(self._set_room_access_sync, room_id, user_ids, granted_by)
+
+    def _set_room_access_sync(
+        self, room_id: str, user_ids: list[str], granted_by: str
+    ) -> tuple[list[User], set[str], set[str]]:
+        desired = set(user_ids)
+        now = _now()
+        with self._connect() as conn:
+            existing = {
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT user_id FROM room_access WHERE room_id = ?", (room_id,)
+                )
+            }
+            added = desired - existing
+            removed = existing - desired
+            for user_id in added:
+                conn.execute(
+                    "INSERT OR IGNORE INTO room_access "
+                    "(room_id, user_id, granted_by, created_at) VALUES (?, ?, ?, ?)",
+                    (room_id, user_id, granted_by, now),
+                )
+            for user_id in removed:
+                conn.execute(
+                    "DELETE FROM room_access WHERE room_id = ? AND user_id = ?",
+                    (room_id, user_id),
+                )
+            rows = self._room_access_rows(conn, room_id)
+        return [_row_to_user(row) for row in rows], added, removed
+
+    async def has_room_access(self, room_id: str, user_id: str) -> bool:
+        return await asyncio.to_thread(self._has_room_access_sync, room_id, user_id)
+
+    def _has_room_access_sync(self, room_id: str, user_id: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM room_access WHERE room_id = ? AND user_id = ?",
+                (room_id, user_id),
+            ).fetchone()
+        return row is not None
+
+    async def list_active_students(self, query: str | None = None, limit: int = 50) -> list[User]:
+        return await self.list_users(status="active", role="student", query=query, limit=limit)
 
     # --------------------------------------------------------------- sessions
 

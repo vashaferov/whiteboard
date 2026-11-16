@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -139,3 +140,18 @@ def test_window_limiter() -> None:
     assert limiter.hit("ip") is False
     limiter.reset("ip")
     assert limiter.hit("ip") is True
+
+
+def test_legacy_snapshots_wiped_once(tmp_path: Path) -> None:
+    from app.services.storage import SnapshotStore
+
+    database = tmp_path / "whiteboard.db"
+    snapshots = SnapshotStore(database)
+    asyncio.run(snapshots.save("old-room", [{"id": "o1"}], 1, []))
+
+    first = AccountStore(database)
+    assert first.legacy_wiped is True
+    assert asyncio.run(snapshots.load("old-room")) is None
+
+    second = AccountStore(database)
+    assert second.legacy_wiped is False

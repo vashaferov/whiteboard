@@ -78,3 +78,12 @@ async def test_legacy_database_is_migrated(tmp_path: Path) -> None:
     assert snapshot.objects == [{"id": "o1"}]
     assert snapshot.workspaces == []
     assert snapshot.seq == 3
+
+
+async def test_delete_snapshot(tmp_path: Path) -> None:
+    store = SnapshotStore(tmp_path / "whiteboard.db")
+    await store.save("room-1", [{"id": "o1"}], 1, [])
+
+    await store.delete("room-1")
+    assert await store.load("room-1") is None
+    await store.delete("room-1")  # идемпотентно

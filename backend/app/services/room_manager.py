@@ -849,6 +849,16 @@ class RoomManager:
         if fields:
             await self._redis.hdel(objects_key, *fields)
 
+    async def purge_room_keys(self) -> int:
+        """Delete every Redis key of a room; used by the accounts migration."""
+        if self._redis is None:
+            return 0
+        pattern = f"{self.settings.redis_prefix}:room:*"
+        keys = [key async for key in self._redis.scan_iter(match=pattern)]
+        if keys:
+            await self._redis.delete(*keys)
+        return len(keys)
+
     async def _start_room_tasks(self, room: Room) -> None:
         pubsub = self._redis.pubsub()
         await pubsub.subscribe(self._channel(room.id))

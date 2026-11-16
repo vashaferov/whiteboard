@@ -560,3 +560,17 @@ async def test_cursor_remove_is_workspace_scoped(settings, tmp_path, redis_pair)
 
     await manager_a.shutdown()
     await manager_b.shutdown()
+
+
+async def test_purge_room_keys_removes_only_room_state(
+    settings: Settings, tmp_path, redis_pair
+) -> None:
+    first_redis, _ = redis_pair
+    manager = make_manager(settings, tmp_path, "purge", first_redis)
+    await first_redis.set("whiteboard:room:a:seq", "1")
+    await first_redis.hset("whiteboard:room:b:presence", mapping={"u": "{}"})
+    await first_redis.set("whiteboard:keep", "keep")
+
+    assert await manager.purge_room_keys() == 2
+    assert await first_redis.get("whiteboard:keep") == "keep"
+    assert await first_redis.keys("whiteboard:room:*") == []
