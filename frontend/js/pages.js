@@ -42,7 +42,8 @@ export class PagesPanel {
     list.className = 'page-list';
     this.container.appendChild(list);
 
-    for (const workspace of workspaces ?? []) {
+    const items = workspaces ?? [];
+    items.forEach((workspace, index) => {
       const item = document.createElement('li');
       item.className = 'page';
       if (workspace.id === activeId) item.classList.add('is-active');
@@ -69,13 +70,16 @@ export class PagesPanel {
         const rename = this._actionButton('page__rename', '✎', 'Переименовать', () => this.onRename?.(workspace));
         const del = this._actionButton('page__delete', '×', 'Удалить', () => this.onDelete?.(workspace));
         for (const button of [up, down, rename, del]) button.disabled = busy;
+        up.disabled = up.disabled || index === 0;
+        down.disabled = down.disabled || index === items.length - 1;
+        del.disabled = del.disabled || items.length <= 1;
 
         actions.append(up, down, rename, del);
         item.appendChild(actions);
       }
 
       list.appendChild(item);
-    }
+    });
   }
 
   _actionButton(className, label, title, onClick) {

@@ -312,6 +312,16 @@ def test_pull_all_students(client: TestClient, login_user, ws_url) -> None:
         assert recv_until(second_ws, "workspace_state")["workspaceId"] == page_id
 
 
+def test_pull_all_without_students_is_silent(client: TestClient, login_user, ws_url) -> None:
+    teacher = login_user("Учитель", "teacher")
+
+    with ws_connect(client, ws_url, teacher["token"]) as (teacher_ws, _):
+        teacher_ws.send_json({"type": "workspace_pull", "all": True})
+        # Pressing "pull everyone" in an empty room is a no-op, not an error.
+        teacher_ws.send_json({"type": "workspace_create"})
+        assert teacher_ws.receive_json()["type"] == "workspace_created"
+
+
 def test_stale_workspace_object_rejected(client: TestClient, login_user, ws_url) -> None:
     teacher = login_user("Учитель", "teacher")
     late = login_user("Опоздавший", "student")

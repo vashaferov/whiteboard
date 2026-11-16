@@ -134,6 +134,50 @@ test('workspaces: switching to a deleted page recovers the board', async ({ brow
   await studentContext.close();
 });
 
+test('workspaces: deleting a non-empty page discards objects and moves viewers', async ({
+  browser,
+}) => {
+  const room = uniqueRoom('ws-del');
+  const teacherContext = await browser.newContext();
+  const studentContext = await browser.newContext();
+  const teacher = await teacherContext.newPage();
+  const student = await studentContext.newPage();
+
+  await login(teacher, { name: 'Учитель', role: 'teacher', room });
+  await login(student, { name: 'Ученик', role: 'student', room });
+
+  await createPage(teacher, 'Вторая');
+  await expect.poll(() => pageNames(student)).toEqual(['Страница 1', 'Вторая']);
+  await selectPage(student, 'Вторая');
+  await expect.poll(() => activePageName(student)).toBe('Вторая');
+
+  await drawRect(teacher, { x: 300, y: 300 }, { x: 420, y: 390 });
+  await expect.poll(() => objectCount(student)).toBe(1);
+
+  let prompt = '';
+  teacher.once('dialog', async (dialog) => {
+    prompt = dialog.message();
+    await dialog.accept();
+  });
+  await teacher.locator('#pages-panel .page', { hasText: 'Вторая' }).locator('.page__delete').click();
+
+  // Objects of the page are gone for good and every viewer lands on the first
+  // remaining page.
+  await expect.poll(() => pageNames(student)).toEqual(['Страница 1']);
+  await expect.poll(() => activePageName(student)).toBe('Страница 1');
+  await expect.poll(() => objectCount(student)).toBe(0);
+  await expect.poll(() => activePageName(teacher)).toBe('Страница 1');
+  expect(await objectCount(teacher)).toBe(0);
+  expect(prompt).toContain('Вторая');
+  expect(prompt).toContain('безвозвратно');
+
+  // The only page left cannot be deleted: its × control is disabled.
+  await expect(teacher.locator('#pages-panel .page__delete')).toBeDisabled();
+
+  await teacherContext.close();
+  await studentContext.close();
+});
+
 test('pull one and all students to the teacher page', async ({ browser }) => {
   const room = uniqueRoom('pull');
   const teacherContext = await browser.newContext();

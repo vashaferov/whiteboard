@@ -101,7 +101,7 @@ backend/
       images.py             # локальное и S3-хранилище изображений
       metrics.py            # Prometheus-метрики
       logging.py            # JSON-логи, request-id, Sentry
-  tests/                    # unit + integration (105 тестов)
+  tests/                    # unit + integration (106 тестов)
 frontend/
   index.html
   js/{main,board,tools,sync}.js
@@ -190,7 +190,8 @@ npx playwright test
 Сценарии: основной урок (рисование, курсор, resize/rotate, текст и его
 редактирование, reload), права и kick, reconnect, страницы (создание, изоляция,
 переключение, переименование, порядок, reload, reconnect, удаление цели
-переключения), перенос учеников (один/все, сохранение черновика), мобильный viewport.
+переключения, удаление непустой страницы), перенос учеников (один/все,
+сохранение черновика), мобильный viewport.
 
 Нагрузочный тест:
 

@@ -526,6 +526,14 @@ textarea {
   color: var(--danger);
 }
 
+.page__up:disabled,
+.page__down:disabled,
+.page__rename:disabled,
+.page__delete:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .board canvas {
   touch-action: none;
 }

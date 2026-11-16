@@ -652,7 +652,10 @@ function requestWorkspaceRename(workspace) {
 }
 
 function requestWorkspaceDelete(workspace) {
-  if (!window.confirm(`Удалить страницу «${workspace.name}»?`)) return;
+  const confirmed = window.confirm(
+    `Удалить страницу «${workspace.name}»? Все объекты на ней будут удалены безвозвратно.`,
+  );
+  if (!confirmed) return;
   state.sync?.send({ type: 'workspace_delete', workspaceId: workspace.id });
 }
 

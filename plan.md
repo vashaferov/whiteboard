@@ -340,7 +340,7 @@
 - [x] Двухфазный перенос: `workspace_prepare_move` → клиент сохраняет черновик текста и финализирует штрих → `workspace_move_ack` → `workspace_state`; таймаут 2 с. Притянутые ученики остаются на странице после переключения учителя.
 - [x] Redis: hash `<prefix>:room:<id>:workspaces`, объекты с `workspaceId`, общее live-состояние и межсерверное притягивание через presence; SQLite — холодное восстановление.
 - [x] Клиент: панель страниц (`frontend/js/pages.js`), активная страница, буферизация событий при переключении, восстановление страницы после reload/reconnect, горизонтальная полоса на мобильном.
-- [x] Тесты: 105 backend-тестов (включая Redis на `fakeredis` и миграцию снимков) и 9 E2E-сценариев.
+- [x] Тесты: 106 backend-тестов (включая Redis на `fakeredis` и миграцию снимков) и 10 E2E-сценариев.
 
 ### Критерии готовности итерации
 
@@ -368,7 +368,7 @@
 | 8. Персистентность | ✅ | `services/storage.py`, `tests/test_storage.py` |
 | 9. Тестирование | ✅ | 52 автотеста, Playwright E2E (4 сценария), load test; edge cases в `tests/test_edge_cases.py` |
 | 10. Деплой и мониторинг | ✅ | Caddy/TLS, `/metrics`, JSON-логи, Sentry, `/health/ready`, бэкапы, `docs/deploy.md`; образ собран, dev/prod compose проверены |
-| Воркспейсы | ✅ | `services/workspaces.py`, `api/ws.py`, `frontend/js/pages.js`; 105 backend-тестов, 9 E2E-сценариев |
+| Воркспейсы | ✅ | `services/workspaces.py`, `api/ws.py`, `frontend/js/pages.js`; 106 backend-тестов, 10 E2E-сценариев |
 | 11. Пилот | ⛔ | Не начат |
 
 **Проверка Docker (эта итерация):**
@@ -381,8 +381,8 @@
 
 **Проверка воркспейсов (эта итерация):**
 
-- Backend: `105 passed`, `ruff` и `black` — чистые.
-- E2E (Playwright): **9 passed** — основной урок, права/kick, reconnect, сценарии страниц (создание, изоляция, переключение, переименование, порядок, reload, reconnect, удаление цели переключения), перенос одного/всех учеников с сохранением черновика, мобильный viewport.
+- Backend: `106 passed`, `ruff` и `black` — чистые.
+- E2E (Playwright): **10 passed** — основной урок, права/kick, reconnect, сценарии страниц (создание, изоляция, переключение, переименование, порядок, reload, reconnect, удаление цели переключения, удаление непустой страницы с объектами), перенос одного/всех учеников с сохранением черновика, мобильный viewport.
 - Нагрузочный smoke: 6 клиентов, 90 отправок, 464 получения, `errors: 0`, p95 ≈ 3.5 мс.
 - `docker compose config --quiet` — без ошибок.
 - Двухфазный перенос: клиент подтверждает перенос только после `text_update`/`stroke_end`, сервер ждёт ack до 2 с, затем переносит принудительно.
@@ -392,7 +392,7 @@
 
 ```bash
 cd backend
-..\.venv\Scripts\python -m pytest       # 105 passed
+..\.venv\Scripts\python -m pytest       # 106 passed
 ..\.venv\Scripts\python -m ruff check .
 ..\.venv\Scripts\python -m black --check .
 ..\.venv\Scripts\python -m uvicorn app.main:app --reload --port 8000

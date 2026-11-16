@@ -747,7 +747,8 @@ async def _handle_workspace_pull(
         )
         return
     moved = await manager.pull_users(room, user, client_ids=message.clientIds, all=message.all)
-    if moved == 0:
+    # "Pull everyone" in a room without students is a no-op, not an error.
+    if moved == 0 and not message.all:
         await manager.send_to(user, _error("user_not_found", "Участник не найден"))
 
 
