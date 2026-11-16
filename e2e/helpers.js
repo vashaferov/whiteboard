@@ -205,6 +205,13 @@ export async function renamePage(page, oldName, newName) {
   await page.locator('#pages-panel .page', { hasText: oldName }).locator('.page__rename').click();
 }
 
+export async function deletePage(page, name) {
+  page.once('dialog', async (dialog) => {
+    await dialog.accept();
+  });
+  await page.locator('#pages-panel .page', { hasText: name }).locator('.page__delete').click();
+}
+
 export async function movePage(page, name, direction) {
   const selector = direction === 'up' ? '.page__up' : '.page__down';
   await page.locator('#pages-panel .page', { hasText: name }).locator(selector).click();

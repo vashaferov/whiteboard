@@ -579,10 +579,21 @@ function renderPages() {
 }
 
 function persistSessionWorkspace() {
+  if (state.sync) state.sync.workspaceId = state.workspaceId ?? '';
   const session = loadSession();
   if (!session) return;
   session.workspaceId = state.workspaceId;
   saveSession(session);
+}
+
+// A pending switch can be refused (stale id) or lose its target (page deleted
+// before workspace_switch was processed). Recover instead of staying frozen.
+function abortPendingWorkspaceSwitch() {
+  if (!state.pendingWorkspaceId) return;
+  state.pendingWorkspaceId = null;
+  state.pendingEvents = [];
+  state.board?.setInteractive(true);
+  renderPages();
 }
 
 function nextPageName() {
@@ -688,6 +699,7 @@ function handleServerEvent(message) {
       handleWorkspaceDeleted(message);
       break;
     case 'error':
+      abortPendingWorkspaceSwitch();
       toast(message.message || 'Ошибка');
       break;
     case 'kicked':
@@ -805,6 +817,7 @@ function handleWorkspaceReordered(message) {
 }
 
 function handleWorkspaceDeleted(message) {
+  if (message.workspaceId === state.pendingWorkspaceId) abortPendingWorkspaceSwitch();
   state.workspaces = state.workspaces.filter((item) => item.id !== message.workspaceId);
   renderPages();
 }
@@ -825,6 +838,7 @@ function handleInit(message) {
   state.pendingWorkspaceId = null;
   state.pendingEvents = [];
   state.stateVersion = 0;
+  if (state.sync) state.sync.workspaceId = state.workspaceId ?? '';
 
   state.board.setBoardSize(message.board.width, message.board.height);
   state.board.setObjects(message.objects);

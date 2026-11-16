@@ -636,7 +636,11 @@ export class Board {
   }
 
   setInteractive(enabled) {
-    this.stage.listening(Boolean(enabled));
+    const interactive = Boolean(enabled);
+    this.stage.listening(interactive);
+    // Konva still emits stage-level pointer events while listening is off,
+    // so block the DOM pointer stream as well.
+    this.stage.container().style.pointerEvents = interactive ? '' : 'none';
   }
 
   destroy() {
