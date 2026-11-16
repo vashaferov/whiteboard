@@ -22,9 +22,6 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "Онлайн-доска"
-    jwt_secret: str = "dev-secret-change-me-please-use-32-bytes"
-    jwt_ttl_hours: int = 12
-    teacher_code: str = "teacher"
 
     admin_login: str = "admin"
     admin_password: str = "admin-change-me"

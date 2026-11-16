@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import base64
-import urllib.parse
+import uuid
 
 import boto3
 from app.config import Settings
 from app.main import create_app
 from fastapi.testclient import TestClient
 from moto import mock_aws
+from tests.support import cookie, ensure_test_room, login_session, make_active_account, ws_connect
 
 PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
@@ -32,23 +33,21 @@ def s3_settings(settings: Settings) -> Settings:
     )
 
 
-def login(client: TestClient, role: str = "teacher") -> dict:
-    payload = {"name": "Анна", "roomId": "room-s3", "role": role}
-    if role == "teacher":
-        payload["code"] = "secret-code"
-    response = client.post("/api/login", json=payload)
-    assert response.status_code == 200, response.text
-    return response.json()
+def login(client: TestClient, role: str = "teacher") -> str:
+    login_name = f"s3-{uuid.uuid4().hex[:8]}"
+    user_id = make_active_account(client, login_name, "Анна", role=role)
+    ensure_test_room(client, "room-s3", user_id, role)
+    return login_session(client, login_name)
 
 
 @mock_aws
 def test_upload_stores_object_in_bucket(settings: Settings) -> None:
     app = create_app(s3_settings(settings))
     with TestClient(app) as client:
-        token = login(client)["token"]
+        token = login(client)
         response = client.post(
             "/api/upload",
-            headers={"Authorization": f"Bearer {token}"},
+            cookies=cookie(token),
             files={"file": ("pixel.png", PNG_1X1, "image/png")},
         )
 
@@ -70,18 +69,16 @@ def test_upload_stores_object_in_bucket(settings: Settings) -> None:
 def test_image_add_accepts_own_url_and_rejects_foreign(settings: Settings) -> None:
     app = create_app(s3_settings(settings))
     with TestClient(app) as client:
-        teacher = login(client)
-        token = teacher["token"]
+        token = login(client)
         upload = client.post(
             "/api/upload",
-            headers={"Authorization": f"Bearer {token}"},
+            cookies=cookie(token),
             files={"file": ("pixel.png", PNG_1X1, "image/png")},
         )
         assert upload.status_code == 200
         url = upload.json()["url"]
 
-        ws_path = f"/ws/room-s3?token={urllib.parse.quote(token)}"
-        with client.websocket_connect(ws_path) as ws:
+        with ws_connect(client, token, "room-s3") as ws:
             ws.receive_json()
             ws.send_json(
                 {
@@ -99,7 +96,7 @@ def test_image_add_accepts_own_url_and_rejects_foreign(settings: Settings) -> No
             ws.send_json({"type": "bogus"})
             assert ws.receive_json()["code"] == "invalid_message"
 
-        with client.websocket_connect(ws_path) as ws:
+        with ws_connect(client, token, "room-s3") as ws:
             init = ws.receive_json()
             assert [obj["id"] for obj in init["objects"]] == ["image-1"]
             assert init["objects"][0]["url"] == url

@@ -8,6 +8,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
+from tests.support import cookie, ws_connect
 
 PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
@@ -27,11 +28,11 @@ SHAPE = {
 }
 
 
-def test_init_and_user_joined(client: TestClient, login_user, ws_url) -> None:
+def test_init_and_user_joined(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         init = teacher_ws.receive_json()
         assert init["type"] == "init"
         assert init["clientId"] == teacher["user"]["id"]
@@ -44,7 +45,7 @@ def test_init_and_user_joined(client: TestClient, login_user, ws_url) -> None:
         assert init["workspaceId"] == "ws_default"
         assert init["permissions"]["canManageWorkspaces"] is True
 
-        with client.websocket_connect(ws_url(student["token"])) as student_ws:
+        with ws_connect(client, student["token"]) as student_ws:
             student_init = student_ws.receive_json()
             assert student_init["type"] == "init"
             assert {user["id"] for user in student_init["users"]} == {
@@ -59,14 +60,14 @@ def test_init_and_user_joined(client: TestClient, login_user, ws_url) -> None:
             assert joined["user"]["id"] == student["user"]["id"]
 
 
-def test_shape_broadcast_and_late_join_snapshot(client: TestClient, login_user, ws_url) -> None:
+def test_shape_broadcast_and_late_join_snapshot(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
     late = login_user("Опоздавший", "student")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
-        with client.websocket_connect(ws_url(student["token"])) as student_ws:
+        with ws_connect(client, student["token"]) as student_ws:
             student_ws.receive_json()
             teacher_ws.receive_json()  # user_joined
 
@@ -78,20 +79,20 @@ def test_shape_broadcast_and_late_join_snapshot(client: TestClient, login_user, 
             assert event["object"]["x"] == 10
             assert event["object"]["seq"] == 1
 
-            with client.websocket_connect(ws_url(late["token"])) as late_ws:
+            with ws_connect(client, late["token"]) as late_ws:
                 late_init = late_ws.receive_json()
                 assert late_init["type"] == "init"
                 assert [obj["id"] for obj in late_init["objects"]] == ["shape-1"]
                 assert late_init["userCount"] == 3
 
 
-def test_stroke_lifecycle(client: TestClient, login_user, ws_url) -> None:
+def test_stroke_lifecycle(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
-        with client.websocket_connect(ws_url(student["token"])) as student_ws:
+        with ws_connect(client, student["token"]) as student_ws:
             student_ws.receive_json()
             teacher_ws.receive_json()
 
@@ -132,13 +133,13 @@ def test_stroke_lifecycle(client: TestClient, login_user, ws_url) -> None:
             assert finished["object"]["seq"] == 1
 
 
-def test_clear_permissions(client: TestClient, login_user, ws_url) -> None:
+def test_clear_permissions(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
-        with client.websocket_connect(ws_url(student["token"])) as student_ws:
+        with ws_connect(client, student["token"]) as student_ws:
             student_ws.receive_json()
             teacher_ws.receive_json()
 
@@ -156,13 +157,13 @@ def test_clear_permissions(client: TestClient, login_user, ws_url) -> None:
             assert cleared["id"] == teacher["user"]["id"]
 
 
-def test_move_permissions(client: TestClient, login_user, ws_url) -> None:
+def test_move_permissions(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
-        with client.websocket_connect(ws_url(student["token"])) as student_ws:
+        with ws_connect(client, student["token"]) as student_ws:
             student_ws.receive_json()
             teacher_ws.receive_json()
 
@@ -201,13 +202,13 @@ def test_move_permissions(client: TestClient, login_user, ws_url) -> None:
             assert (forced_move["x"], forced_move["y"]) == (9, 10)
 
 
-def test_delete_permissions(client: TestClient, login_user, ws_url) -> None:
+def test_delete_permissions(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
-        with client.websocket_connect(ws_url(student["token"])) as student_ws:
+        with ws_connect(client, student["token"]) as student_ws:
             student_ws.receive_json()
             teacher_ws.receive_json()
 
@@ -225,13 +226,13 @@ def test_delete_permissions(client: TestClient, login_user, ws_url) -> None:
             assert deleted["objectId"] == "to-delete"
 
 
-def test_invalid_message_keeps_connection(client: TestClient, login_user, ws_url) -> None:
+def test_invalid_message_keeps_connection(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
-        with client.websocket_connect(ws_url(student["token"])) as student_ws:
+        with ws_connect(client, student["token"]) as student_ws:
             student_ws.receive_json()
             teacher_ws.receive_json()
 
@@ -255,13 +256,13 @@ def test_invalid_message_keeps_connection(client: TestClient, login_user, ws_url
             assert teacher_ws.receive_json()["type"] == "shape_add"
 
 
-def test_teacher_can_kick_student(client: TestClient, login_user, ws_url) -> None:
+def test_teacher_can_kick_student(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
-        with client.websocket_connect(ws_url(student["token"])) as student_ws:
+        with ws_connect(client, student["token"]) as student_ws:
             student_ws.receive_json()
             teacher_ws.receive_json()
 
@@ -273,21 +274,21 @@ def test_teacher_can_kick_student(client: TestClient, login_user, ws_url) -> Non
             assert left == {"type": "user_left", "id": student["user"]["id"]}
 
 
-def test_image_add_requires_uploaded_file(client: TestClient, login_user, ws_url) -> None:
+def test_image_add_requires_uploaded_file(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
 
     upload = client.post(
         "/api/upload",
-        headers={"Authorization": f"Bearer {teacher['token']}"},
+        cookies=cookie(teacher["token"]),
         files={"file": ("pixel.png", PNG_1X1, "image/png")},
     )
     assert upload.status_code == 200
     url = upload.json()["url"]
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
-        with client.websocket_connect(ws_url(student["token"])) as student_ws:
+        with ws_connect(client, student["token"]) as student_ws:
             student_ws.receive_json()
             teacher_ws.receive_json()
 
@@ -325,13 +326,13 @@ def test_image_add_requires_uploaded_file(client: TestClient, login_user, ws_url
             }
 
 
-def test_object_transform_permissions_and_broadcast(client: TestClient, login_user, ws_url) -> None:
+def test_object_transform_permissions_and_broadcast(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
-        with client.websocket_connect(ws_url(student["token"])) as student_ws:
+        with ws_connect(client, student["token"]) as student_ws:
             student_ws.receive_json()
             teacher_ws.receive_json()
 
@@ -390,10 +391,10 @@ def test_object_transform_permissions_and_broadcast(client: TestClient, login_us
             assert own_transform["object"]["rotation"] == -15
 
 
-def test_object_transform_rejects_strokes(client: TestClient, login_user, ws_url) -> None:
+def test_object_transform_rejects_strokes(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
         teacher_ws.send_json(
             {
@@ -420,7 +421,7 @@ def test_object_transform_rejects_strokes(client: TestClient, login_user, ws_url
         assert error["code"] == "not_transformable"
 
 
-def test_text_update_permissions_and_broadcast(client: TestClient, login_user, ws_url) -> None:
+def test_text_update_permissions_and_broadcast(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
 
@@ -434,9 +435,9 @@ def test_text_update_permissions_and_broadcast(client: TestClient, login_user, w
         "fontSize": 24,
     }
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
-        with client.websocket_connect(ws_url(student["token"])) as student_ws:
+        with ws_connect(client, student["token"]) as student_ws:
             student_ws.receive_json()
             teacher_ws.receive_json()
 
@@ -474,26 +475,24 @@ def test_text_update_permissions_and_broadcast(client: TestClient, login_user, w
             assert error["code"] == "not_text"
 
 
-def test_snapshot_restored_after_room_closure(client: TestClient, login_user, ws_url) -> None:
+def test_snapshot_restored_after_room_closure(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
         teacher_ws.send_json(SHAPE)
 
     time.sleep(0.2)
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         init = teacher_ws.receive_json()
         assert [obj["id"] for obj in init["objects"]] == ["shape-1"]
 
 
-def test_transform_and_text_edit_restore_after_room_closure(
-    client: TestClient, login_user, ws_url
-) -> None:
+def test_transform_and_text_edit_restore_after_room_closure(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         teacher_ws.receive_json()
         teacher_ws.send_json(
             {
@@ -520,7 +519,7 @@ def test_transform_and_text_edit_restore_after_room_closure(
 
     time.sleep(0.2)
 
-    with client.websocket_connect(ws_url(teacher["token"])) as teacher_ws:
+    with ws_connect(client, teacher["token"]) as teacher_ws:
         init = teacher_ws.receive_json()
         assert len(init["objects"]) == 1
         restored = init["objects"][0]
@@ -531,15 +530,8 @@ def test_transform_and_text_edit_restore_after_room_closure(
         assert restored["fontSize"] == 48
 
 
-def test_websocket_requires_valid_token(client: TestClient, login_user, ws_url) -> None:
-    student = login_user("Ученик", "student")
-
-    with client.websocket_connect("/ws/room-1?token=garbage") as ws:
+def test_websocket_requires_valid_session(client: TestClient) -> None:
+    with ws_connect(client, "missing-session", "room-1") as ws:
         with pytest.raises(WebSocketDisconnect) as invalid:
             ws.receive_json()
         assert invalid.value.code == 4401
-
-    with client.websocket_connect(ws_url(student["token"], room="room-2")) as ws:
-        with pytest.raises(WebSocketDisconnect) as mismatch:
-            ws.receive_json()
-        assert mismatch.value.code == 4403

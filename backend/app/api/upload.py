@@ -7,13 +7,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
-from app.api.deps import get_app_settings, get_current_user, get_image_storage
+from app.api.deps import (
+    get_app_settings,
+    get_auth_user,
+    get_image_storage,
+    require_same_origin,
+)
 from app.config import Settings
 from app.services import metrics
-from app.services.auth import TokenPayload
+from app.services.accounts import User
 from app.services.images import ImageStorage
 
-router = APIRouter(prefix="/api", tags=["upload"])
+router = APIRouter(prefix="/api", tags=["upload"], dependencies=[Depends(require_same_origin)])
 
 # content type -> (extension, accepted file signatures)
 ALLOWED_TYPES: dict[str, tuple[str, tuple[bytes, ...]]] = {
@@ -27,7 +32,7 @@ ALLOWED_TYPES: dict[str, tuple[str, tuple[bytes, ...]]] = {
 @router.post("/upload")
 async def upload_image(
     file: Annotated[UploadFile, File()],
-    user: Annotated[TokenPayload, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_auth_user)],
     settings: Annotated[Settings, Depends(get_app_settings)],
     images: Annotated[ImageStorage, Depends(get_image_storage)],
 ) -> dict[str, object]:
@@ -67,5 +72,5 @@ async def upload_image(
         "url": url,
         "filename": filename,
         "size": len(data),
-        "uploadedBy": user.user_id,
+        "uploadedBy": user.id,
     }

@@ -164,31 +164,6 @@ class AdminPasswordReset(BaseModel):
         return value
 
 
-class LoginRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=40)
-    roomId: str = Field(pattern=ROOM_ID_PATTERN)
-    role: Literal["teacher", "student"]
-    code: str | None = Field(default=None, max_length=100)
-
-    @field_validator("name")
-    @classmethod
-    def _clean_name(cls, value: str) -> str:
-        cleaned = " ".join(value.split())
-        if not cleaned:
-            raise ValueError("Имя не может быть пустым")
-        return cleaned
-
-
-class LoginResponse(BaseModel):
-    token: str
-    user: UserInfo
-    roomId: str
-    board: BoardSize
-    permissions: Permissions
-
-
 class Point(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

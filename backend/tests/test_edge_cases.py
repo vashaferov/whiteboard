@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import base64
 import json
+import uuid
 
 from app.config import Settings
 from app.main import create_app
 from fastapi.testclient import TestClient
+from tests.support import (
+    cookie,
+    ensure_test_room,
+    login_session,
+    make_active_account,
+    ws_connect,
+)
 
 PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
@@ -23,18 +31,11 @@ STROKE_START = {
 
 
 def login(client: TestClient, name: str, role: str = "student") -> dict:
-    payload = {"name": name, "roomId": "edge", "role": role}
-    if role == "teacher":
-        payload["code"] = "secret-code"
-    response = client.post("/api/login", json=payload)
-    assert response.status_code == 200, response.text
-    return response.json()
-
-
-def ws_path(token: str, room: str = "edge") -> str:
-    import urllib.parse
-
-    return f"/ws/{room}?token={urllib.parse.quote(token)}"
+    login_name = f"edge-{uuid.uuid4().hex[:8]}"
+    user_id = make_active_account(client, login_name, name, role=role)
+    ensure_test_room(client, "edge", user_id, role)
+    session = login_session(client, login_name)
+    return {"token": session, "user": {"id": user_id, "name": name, "role": role}}
 
 
 def test_upload_over_limit_is_rejected(settings: Settings) -> None:
@@ -43,16 +44,16 @@ def test_upload_over_limit_is_rejected(settings: Settings) -> None:
         token = login(client, "Учитель", "teacher")["token"]
         response = client.post(
             "/api/upload",
-            headers={"Authorization": f"Bearer {token}"},
+            cookies=cookie(token),
             files={"file": ("pixel.png", PNG_1X1, "image/png")},
         )
     assert response.status_code == 413
     assert "0 МБ" in response.json()["detail"]
 
 
-def test_ws_message_over_limit_is_rejected(client: TestClient, login_user, ws_url) -> None:
+def test_ws_message_over_limit_is_rejected(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
-    with client.websocket_connect(ws_url(teacher["token"])) as ws:
+    with ws_connect(client, teacher["token"]) as ws:
         ws.receive_json()
         ws.send_text(json.dumps({"type": "cursor", "x": 1, "y": 2, "pad": "x" * 300_000}))
         error = ws.receive_json()
@@ -60,10 +61,10 @@ def test_ws_message_over_limit_is_rejected(client: TestClient, login_user, ws_ur
     assert error["code"] == "message_too_large"
 
 
-def test_disconnect_during_stroke_finalizes_it(client: TestClient, login_user, ws_url) -> None:
+def test_disconnect_during_stroke_finalizes_it(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as ws:
+    with ws_connect(client, teacher["token"]) as ws:
         ws.receive_json()
         ws.send_json({**STROKE_START, "point": {"x": 10, "y": 10}})
         ws.send_json({"type": "stroke_point", "objectId": "stroke-1", "point": {"x": 60, "y": 40}})
@@ -71,13 +72,13 @@ def test_disconnect_during_stroke_finalizes_it(client: TestClient, login_user, w
         ws.send_json({"type": "bogus"})
         assert ws.receive_json()["code"] == "invalid_message"
 
-    with client.websocket_connect(ws_url(teacher["token"])) as ws:
+    with ws_connect(client, teacher["token"]) as ws:
         init = ws.receive_json()
     assert [obj["id"] for obj in init["objects"]] == ["stroke-1"]
     assert len(init["objects"][0]["points"]) == 2
 
 
-def test_two_students_can_draw_at_the_same_time(client: TestClient, login_user, ws_url) -> None:
+def test_two_students_can_draw_at_the_same_time(client: TestClient, login_user) -> None:
     first = login_user("Первый", "student")
     second = login_user("Второй", "student")
 
@@ -92,9 +93,9 @@ def test_two_students_can_draw_at_the_same_time(client: TestClient, login_user, 
         "strokeWidth": 2,
     }
 
-    with client.websocket_connect(ws_url(first["token"])) as first_ws:
+    with ws_connect(client, first["token"]) as first_ws:
         first_ws.receive_json()
-        with client.websocket_connect(ws_url(second["token"])) as second_ws:
+        with ws_connect(client, second["token"]) as second_ws:
             second_ws.receive_json()
             first_ws.receive_json()
 
@@ -108,10 +109,10 @@ def test_two_students_can_draw_at_the_same_time(client: TestClient, login_user, 
     assert got_first["object"]["id"] == "shape-second"
 
 
-def test_invalid_transform_rotation_is_rejected(client: TestClient, login_user, ws_url) -> None:
+def test_invalid_transform_rotation_is_rejected(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as ws:
+    with ws_connect(client, teacher["token"]) as ws:
         ws.receive_json()
         ws.send_json(
             {
@@ -126,10 +127,10 @@ def test_invalid_transform_rotation_is_rejected(client: TestClient, login_user, 
     assert error["code"] == "invalid_message"
 
 
-def test_empty_text_update_is_rejected(client: TestClient, login_user, ws_url) -> None:
+def test_empty_text_update_is_rejected(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
 
-    with client.websocket_connect(ws_url(teacher["token"])) as ws:
+    with ws_connect(client, teacher["token"]) as ws:
         ws.receive_json()
         ws.send_json({"type": "text_update", "objectId": "text-1", "content": ""})
         error = ws.receive_json()

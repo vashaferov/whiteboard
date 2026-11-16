@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hmac
-import uuid
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -22,8 +20,6 @@ from app.models.schemas import (
     AuthResponse,
     BoardSize,
     Credentials,
-    LoginRequest,
-    LoginResponse,
     RegisterRequest,
     UserInfo,
     permissions_for,
@@ -32,9 +28,7 @@ from app.services.accounts import AccountStore, LoginTakenError, User
 from app.services.auth import (
     SESSION_COOKIE,
     WindowLimiter,
-    create_token,
     hash_password,
-    pick_color,
     verify_password,
 )
 
@@ -109,54 +103,28 @@ async def register(
 
 @router.post("/login", response_model=None)
 async def login(
-    payload: Credentials | LoginRequest,
+    payload: Credentials,
     request: Request,
     accounts: Annotated[AccountStore, Depends(get_account_store)],
     settings: Annotated[Settings, Depends(get_app_settings)],
-) -> Any:
-    if isinstance(payload, Credentials):
-        limiter: WindowLimiter = request.app.state.login_limiter
-        bucket = f"login:{client_ip(request)}"
-        if not limiter.hit(bucket):
-            raise api_error(429, "rate_limited", "Слишком много попыток входа")
+) -> JSONResponse:
+    limiter: WindowLimiter = request.app.state.login_limiter
+    bucket = f"login:{client_ip(request)}"
+    if not limiter.hit(bucket):
+        raise api_error(429, "rate_limited", "Слишком много попыток входа")
 
-        found = await accounts.get_user_with_hash(payload.login)
-        if found is None or not verify_password(payload.password, found[1]):
-            raise api_error(401, "invalid_credentials", "Неверный логин или пароль")
-        user, _ = found
-        if user.status != "active":
-            raise api_error(403, user.status, STATUS_MESSAGES.get(user.status, "Доступ закрыт"))
-        limiter.reset(bucket)
+    found = await accounts.get_user_with_hash(payload.login)
+    if found is None or not verify_password(payload.password, found[1]):
+        raise api_error(401, "invalid_credentials", "Неверный логин или пароль")
+    user, _ = found
+    if user.status != "active":
+        raise api_error(403, user.status, STATUS_MESSAGES.get(user.status, "Доступ закрыт"))
+    limiter.reset(bucket)
 
-        session_id = await accounts.create_session(user.id, int(settings.session_ttl_hours * 3600))
-        response = JSONResponse(auth_response(user, settings).model_dump())
-        set_session_cookie(response, settings, session_id)
-        return response
-
-    # legacy до Task 7: вход по имени/роли/коду выдаёт JWT для старого WS.
-    if payload.role == "teacher":
-        expected = settings.teacher_code
-        provided = payload.code or ""
-        if not expected or not hmac.compare_digest(provided, expected):
-            raise api_error(403, "forbidden", "Неверный код учителя")
-
-    user_id = f"u_{uuid.uuid4().hex[:16]}"
-    color = pick_color(user_id + payload.name)
-    token = create_token(
-        settings,
-        user_id=user_id,
-        name=payload.name,
-        role=payload.role,
-        room_id=payload.roomId,
-        color=color,
-    )
-    return LoginResponse(
-        token=token,
-        user=UserInfo(id=user_id, name=payload.name, role=payload.role, color=color),
-        roomId=payload.roomId,
-        board=BoardSize(width=settings.board_width, height=settings.board_height),
-        permissions=permissions_for(payload.role),
-    )
+    session_id = await accounts.create_session(user.id, int(settings.session_ttl_hours * 3600))
+    response = JSONResponse(auth_response(user, settings).model_dump())
+    set_session_cookie(response, settings, session_id)
+    return response
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

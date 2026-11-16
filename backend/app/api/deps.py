@@ -6,18 +6,15 @@ from dataclasses import dataclass
 from typing import Annotated
 from urllib.parse import urlsplit
 
-from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, Request
 
 from app.api.errors import api_error
 from app.config import Settings
 from app.services.accounts import AccountStore, User
-from app.services.auth import SESSION_COOKIE, TokenError, TokenPayload, decode_token
+from app.services.auth import SESSION_COOKIE
 from app.services.images import ImageStorage
 from app.services.room_manager import RoomManager
 from app.services.storage import SnapshotStore
-
-bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_app_settings(request: Request) -> Settings:
@@ -80,23 +77,3 @@ async def require_same_origin(request: Request) -> None:
         return
     if urlsplit(origin).netloc != request.headers.get("host", ""):
         raise api_error(403, "bad_origin", "Запрос с чужого источника")
-
-
-async def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-    settings: Annotated[Settings, Depends(get_app_settings)],
-) -> TokenPayload:
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Требуется авторизация",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    try:
-        return decode_token(settings, credentials.credentials)
-    except TokenError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(exc),
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc

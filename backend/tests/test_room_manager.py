@@ -50,8 +50,6 @@ def make_user(
 
 def build_manager(tmp_path: Path) -> tuple[Settings, SnapshotStore, RoomManager]:
     settings = Settings(
-        jwt_secret="test-secret-0123456789abcdef0123456789",
-        teacher_code="code",
         data_dir=tmp_path / "data",
         uploads_dir=tmp_path / "uploads",
         frontend_dir=tmp_path / "frontend",

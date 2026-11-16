@@ -40,7 +40,7 @@ from app.models.schemas import (
 from app.services import metrics
 from app.services.access import can_access_room
 from app.services.accounts import AccountStore
-from app.services.auth import SESSION_COOKIE, TokenError, decode_token, is_staff
+from app.services.auth import SESSION_COOKIE, is_staff
 from app.services.room_manager import ConnectedUser, RateLimiter, Room, RoomManager
 
 logger = logging.getLogger(__name__)
@@ -109,7 +109,6 @@ async def _check_object_workspace(
 async def websocket_endpoint(
     websocket: WebSocket,
     room_id: str,
-    token: str = Query(default=""),
     workspace: str = Query(default=""),
 ) -> None:
     settings: Settings = websocket.app.state.settings
@@ -125,7 +124,7 @@ async def websocket_endpoint(
             await websocket.close(code=4400, reason="invalid_room")
             return
 
-        user = await _authenticate(websocket, accounts, settings, room_id, token)
+        user = await _authenticate(websocket, accounts, settings, room_id)
         if user is None:
             return
 
@@ -176,46 +175,26 @@ async def _authenticate(
     accounts: AccountStore,
     settings: Settings,
     room_id: str,
-    token: str,
 ) -> ConnectedUser | None:
-    """Resolve the socket owner from the session cookie, falling back to a JWT."""
+    """Resolve the socket owner from the session cookie."""
     session_id = websocket.cookies.get(SESSION_COOKIE)
-    if session_id:
-        account = await accounts.get_session_user(session_id)
-        if account is None or account.status != "active":
-            await websocket.close(code=4401, reason="unauthorized")
-            return None
-        room = await accounts.get_room(room_id)
-        if room is None:
-            await websocket.close(code=4404, reason="room_not_found")
-            return None
-        granted = await accounts.has_room_access(room_id, account.id)
-        if not can_access_room(account, room, granted=granted):
-            await websocket.close(code=4403, reason="forbidden")
-            return None
-        return ConnectedUser(
-            id=account.id,
-            name=account.name,
-            role=account.role,
-            color=account.color,
-            websocket=websocket,
-            limiter=_limiter(settings),
-        )
-
-    # legacy до Task 7: токен из query-строки.
-    try:
-        payload = decode_token(settings, token)
-    except TokenError:
+    account = await accounts.get_session_user(session_id) if session_id else None
+    if account is None or account.status != "active":
         await websocket.close(code=4401, reason="unauthorized")
         return None
-    if payload.room_id != room_id:
-        await websocket.close(code=4403, reason="room_mismatch")
+    room = await accounts.get_room(room_id)
+    if room is None:
+        await websocket.close(code=4404, reason="room_not_found")
+        return None
+    granted = await accounts.has_room_access(room_id, account.id)
+    if not can_access_room(account, room, granted=granted):
+        await websocket.close(code=4403, reason="forbidden")
         return None
     return ConnectedUser(
-        id=payload.user_id,
-        name=payload.name,
-        role=payload.role,
-        color=payload.color,
+        id=account.id,
+        name=account.name,
+        role=account.role,
+        color=account.color,
         websocket=websocket,
         limiter=_limiter(settings),
     )

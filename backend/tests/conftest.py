@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import sys
-import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -17,9 +17,15 @@ if str(BACKEND_DIR) not in sys.path:
 from app.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
 from fakeredis import FakeAsyncRedis, FakeServer  # noqa: E402
-from tests.support import ADMIN_LOGIN, ADMIN_PASSWORD, login_session  # noqa: E402
+from tests.support import (  # noqa: E402
+    ADMIN_LOGIN,
+    ADMIN_PASSWORD,
+    ensure_test_room,
+    login_session,
+    make_active_account,
+)
 
-TEACHER_CODE = "secret-code"
+_SEQUENCE = itertools.count(1)
 
 
 @pytest.fixture
@@ -35,8 +41,6 @@ async def redis_pair():
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(
-        jwt_secret="test-secret-0123456789abcdef0123456789",
-        teacher_code=TEACHER_CODE,
         admin_login=ADMIN_LOGIN,
         admin_password=ADMIN_PASSWORD,
         admin_name="Администратор",
@@ -87,21 +91,16 @@ def login_user(client: TestClient):
         name: str = "Анна",
         role: str = "student",
         room: str = "room-1",
-        code: str | None = None,
     ) -> dict:
-        payload: dict[str, str] = {"name": name, "roomId": room, "role": role}
-        if role == "teacher":
-            payload["code"] = TEACHER_CODE if code is None else code
-        response = client.post("/api/login", json=payload)
-        assert response.status_code == 200, response.text
-        return response.json()
+        suffix = next(_SEQUENCE)
+        login = f"fixture{suffix}"
+        user_id = make_active_account(client, login, name, role=role)
+        ensure_test_room(client, room, user_id, role)
+        session = login_session(client, login)
+        return {
+            "token": session,
+            "user": {"id": user_id, "name": name, "role": role},
+            "roomId": room,
+        }
 
     return _login
-
-
-@pytest.fixture
-def ws_url():
-    def _url(token: str, room: str = "room-1") -> str:
-        return f"/ws/{room}?token={urllib.parse.quote(token)}"
-
-    return _url
