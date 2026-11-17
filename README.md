@@ -21,7 +21,11 @@
   элементы прикрепляются и двигаются вместе с фреймом.
 - Выбор и перемещение объектов (ученик — свои, учитель и администратор — любые); картинку
   можно двигать сразу после вставки.
-- Ластик удаляет объекты целиком (учитель — любые, ученик — свои).
+- Ластик стирает только штрихи кисти (учитель — любые, ученик — свои).
+- Отмена (`Ctrl+Z` или кнопка) возвращает моё последнее действие, включая удаление;
+  история личная и живёт до смены страницы, перезагрузки или выхода.
+- Блокировка: учитель запирает элемент от любых изменений ученика; замок наследуется
+  детьми фрейма, а новые объекты в заблокированный фрейм не захватываются.
 - Масштабирование и поворот фигур, текста и изображений через Transformer.
 - Редактирование текста двойным кликом или клавишей `F2`.
 - Загрузка изображений через `POST /api/upload` (локально или в S3-совместимом хранилище).
@@ -180,15 +184,16 @@ docker-compose.prod.yml     # prod: Caddy + whiteboard + Redis + SeaweedFS
 
 Клиент → сервер: `stroke_start`, `stroke_point`, `stroke_end`, `shape_add`, `text_add`,
 `image_add`, `connector_add`, `frame_add`, `frame_move`, `frame_style`, `object_update`,
-`object_transform`, `text_update`, `object_delete`, `cursor`, `clear`, `kick`,
-`workspace_switch`, `workspace_create`, `workspace_rename`, `workspace_delete`,
+`object_transform`, `text_update`, `object_delete`, `object_lock`, `undo`, `cursor`, `clear`,
+`kick`, `workspace_switch`, `workspace_create`, `workspace_rename`, `workspace_delete`,
 `workspace_reorder`, `workspace_pull`, `workspace_move_ack`.
 
 Сервер → клиент: `init`, `user_joined`, `user_left`, `stroke_*`, `shape_add`, `text_add`,
 `image_add`, `connector_add`, `frame_add`, `frame_captured`, `frame_moved`, `frame_style`,
-`object_update`, `object_transform`, `text_update`, `object_delete`, `cursor`, `cursor_remove`,
-`workspace_state`, `workspace_created`, `workspace_renamed`, `workspace_reordered`,
-`workspace_deleted`, `workspace_prepare_move`, `workspace_moved`, `clear`, `error`, `kicked`.
+`object_update`, `object_transform`, `text_update`, `object_delete`, `object_lock`,
+`objects_restored`, `cursor`, `cursor_remove`, `workspace_state`, `workspace_created`,
+`workspace_renamed`, `workspace_reordered`, `workspace_deleted`, `workspace_prepare_move`,
+`workspace_moved`, `clear`, `error`, `kicked`.
 
 Дополнительно:
 
@@ -197,6 +202,13 @@ docker-compose.prod.yml     # prod: Caddy + whiteboard + Redis + SeaweedFS
 - `object_transform` — resize/rotate (`x`, `y`, `width`, `height`, `rotation`, `fontSize`);
   блоки схемы и фреймы не поворачиваются.
 - `text_update` — изменение содержимого текста или подписи блока схемы (автор или staff).
+- `object_lock` — только staff; ставит и снимает замок. Замок наследуется детьми фрейма:
+  ученик не может двигать, масштабировать, переподписывать, стилизовать или удалять
+  заблокированный объект; новый объект в заблокированный фрейм не захватывается.
+- `undo` — отменить моё последнее действие. История личная и серверная (до 50 записей):
+  смена страницы, `clear`, переподключение, кик и удаление страницы её очищают.
+  Результат приходит всем как `objects_restored` `{removedIds, objects: [{index, object}],
+  workspaceId}`.
 - `connector_add` — стрелка между двумя блоками; рассылается всем, включая отправителя;
   удаление блока каскадно удаляет его стрелки.
 - `frame_add`, `frame_captured`, `frame_moved`, `frame_style` — создание фрейма, захват
