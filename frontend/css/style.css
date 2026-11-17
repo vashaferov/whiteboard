@@ -562,13 +562,40 @@ textarea {
 
 .users-panel {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
   gap: 10px;
   width: 232px;
+  min-width: 200px;
+  max-width: min(560px, 50vw);
   padding: 16px;
   overflow-y: auto;
   background: var(--panel);
   border-left: 1px solid var(--border);
+}
+
+.users-resizer {
+  flex: 0 0 6px;
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.users-resizer::before {
+  content: '';
+  position: absolute;
+  inset: 35% 2px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  opacity: 0.55;
+  transition: background 120ms ease, opacity 120ms ease;
+}
+
+.users-resizer:hover::before,
+.users-resizer.is-active::before,
+.users-resizer:focus-visible::before {
+  background: var(--accent);
+  opacity: 1;
 }
 
 .users-panel__title {
@@ -634,6 +661,8 @@ textarea {
 }
 
 .user__name {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   font-size: 14px;
   text-overflow: ellipsis;
@@ -736,6 +765,10 @@ kbd {
 
 @media (max-width: 900px) {
   .users-panel {
+    display: none;
+  }
+
+  .users-resizer {
     display: none;
   }
 

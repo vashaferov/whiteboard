@@ -266,7 +266,19 @@
 
         <div id="board" class="board"></div>
 
-        <aside class="users-panel">
+        <div
+          id="users-resizer"
+          class="users-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Изменить ширину панели участников"
+          aria-valuemin="200"
+          aria-valuemax="560"
+          title="Потяните, чтобы изменить ширину панели"
+          tabindex="0"
+        ></div>
+
+        <aside id="users-panel" class="users-panel">
           <h2 class="users-panel__title">Участники <span id="user-count"></span></h2>
           <ul id="user-list" class="user-list"></ul>
           <div id="pull-actions" class="users-panel__pull" hidden>

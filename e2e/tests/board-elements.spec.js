@@ -510,8 +510,18 @@ test('eraser: leaves a block and its arrows; delete removes them', async ({
   await eraseAt(teacher, { x: 280, y: 250 });
   await expect.poll(() => objectCount(teacher)).toBe(3);
 
+  // Let Konva's double-click window pass: the eraser tap and the selection
+  // click are different points, but Konva only checks the time between taps.
+  await teacher.waitForTimeout(500);
   await teacher.click('[data-tool="select"]');
-  await clickWorld(teacher, { x: 200, y: 250 });
+  await clickWorld(teacher, { x: 203, y: 250 });
+  await expect
+    .poll(() =>
+      teacher.evaluate(
+        () => window.Konva.stages[0].findOne('Transformer')?.nodes()[0]?.id() ?? null,
+      ),
+    )
+    .not.toBeNull();
   await teacher.keyboard.press('Delete');
   await expect.poll(() => objectCount(teacher)).toBe(1);
 

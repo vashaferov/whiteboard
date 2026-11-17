@@ -8,6 +8,22 @@ const MIN_SCALE = 0.1;
 const FLOW_SHAPES = new Set(['process', 'decision', 'terminator']);
 const LOCK_BADGE = '🔒';
 const LOCK_BADGE_SIZE = 14;
+const CURSOR_DARK_INK = '#0f172a';
+const CURSOR_LIGHT_INK = '#ffffff';
+// Relative luminance threshold where black and white have equal WCAG contrast.
+const CURSOR_INK_THRESHOLD = 0.179;
+
+export function cursorInk(color) {
+  const match = /^#([0-9a-f]{6})$/i.exec(color ?? '');
+  if (!match) return CURSOR_LIGHT_INK;
+  const channels = [0, 2, 4].map((offset) => {
+    const channel = parseInt(match[1].slice(offset, offset + 2), 16) / 255;
+    return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance =
+    0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  return luminance > CURSOR_INK_THRESHOLD ? CURSOR_DARK_INK : CURSOR_LIGHT_INK;
+}
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -1207,24 +1223,28 @@ export class Board {
   // ------------------------------------------------------------------ cursors
 
   upsertCursor(id, { x, y, name, color }) {
+    const fill = /^#[0-9a-f]{6}$/i.test(color ?? '') ? color : '#2563eb';
+    const ink = cursorInk(fill);
     let cursor = this.cursors.get(id);
     if (!cursor) {
       const group = new Konva.Group({ listening: false });
       const pointer = new Konva.Path({
         data: 'M0 0 L0 18 L5 13.5 L8.5 20 L12 18.5 L8.5 12 L15 12 Z',
-        fill: color,
-        stroke: '#ffffff',
-        strokeWidth: 1.5,
-        shadowColor: 'rgba(15,23,42,0.35)',
-        shadowBlur: 4,
+        fill,
+        stroke: ink,
+        strokeWidth: 2,
+        shadowColor: 'rgba(15,23,42,0.45)',
+        shadowBlur: 5,
       });
       const tag = new Konva.Rect({
         x: 15,
         y: 15,
         height: 20,
         cornerRadius: 6,
-        fill: color,
-        opacity: 0.95,
+        fill,
+        stroke: ink,
+        strokeWidth: 1,
+        opacity: 0.97,
       });
       const text = new Konva.Text({
         x: 21,
@@ -1232,15 +1252,18 @@ export class Board {
         text: name || '',
         fontSize: 12,
         fontFamily: FONT_FAMILY,
-        fill: '#ffffff',
+        fill: ink,
       });
       group.add(pointer, tag, text);
       this.overlayLayer.add(group);
       cursor = { group, pointer, tag, text };
       this.cursors.set(id, cursor);
     }
-    cursor.pointer.fill(color);
-    cursor.tag.fill(color);
+    cursor.pointer.fill(fill);
+    cursor.pointer.stroke(ink);
+    cursor.tag.fill(fill);
+    cursor.tag.stroke(ink);
+    cursor.text.fill(ink);
     cursor.text.text(name || '');
     cursor.tag.width(cursor.text.width() + 12);
     cursor.group.position({ x, y });

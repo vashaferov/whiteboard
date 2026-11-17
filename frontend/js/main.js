@@ -9,6 +9,10 @@ import { initAuth, showAuth } from './auth.js';
 import { initDashboard, showDashboard } from './dashboard.js';
 
 const ROOM_KEY = 'wb:room';
+const USERS_PANEL_KEY = 'wb:usersPanelWidth';
+const USERS_PANEL_MIN = 200;
+const USERS_PANEL_MAX = 560;
+const USERS_PANEL_DEFAULT = 232;
 const DEFAULT_BOARD = { width: 1600, height: 900 };
 const PALETTE = ['#111827', '#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777'];
 const TOOL_KEYS = {
@@ -104,6 +108,7 @@ function init() {
   cacheElements();
   buildPalette();
   buildFramePanel();
+  bindUsersResizer();
   bindToolbar();
   bindTextEditor();
   bindKeyboard();
@@ -164,6 +169,8 @@ function cacheElements() {
   };
   els.userList = $('#user-list');
   els.userCount = $('#user-count');
+  els.usersPanel = $('#users-panel');
+  els.usersResizer = $('#users-resizer');
   els.pullActions = $('#pull-actions');
   els.pullSelected = $('#pull-selected');
   els.pullAll = $('#pull-all');
@@ -1147,6 +1154,7 @@ function renderUsers() {
     const name = document.createElement('span');
     name.className = 'user__name';
     name.textContent = user.name;
+    name.title = user.name;
     item.appendChild(name);
 
     if (isStaff(user.role)) {
@@ -1260,6 +1268,87 @@ function bindKeyboard() {
     if (event.key === 'Escape') {
       state.board?.selectObject(null);
     }
+  });
+}
+
+function usersPanelMaxWidth() {
+  return Math.max(
+    USERS_PANEL_MIN,
+    Math.min(USERS_PANEL_MAX, Math.floor(window.innerWidth * 0.5)),
+  );
+}
+
+function clampUsersPanelWidth(width) {
+  return Math.min(
+    usersPanelMaxWidth(),
+    Math.max(USERS_PANEL_MIN, Math.round(width)),
+  );
+}
+
+function applyUsersPanelWidth(width, { persist = false } = {}) {
+  if (!els.usersPanel) return;
+  const value = clampUsersPanelWidth(width);
+  els.usersPanel.style.width = `${value}px`;
+  els.usersResizer?.setAttribute('aria-valuenow', String(value));
+  if (persist) localStorage.setItem(USERS_PANEL_KEY, String(value));
+}
+
+function bindUsersResizer() {
+  if (!els.usersPanel || !els.usersResizer) return;
+
+  const saved = Number(localStorage.getItem(USERS_PANEL_KEY));
+  applyUsersPanelWidth(Number.isFinite(saved) && saved > 0 ? saved : USERS_PANEL_DEFAULT);
+
+  let dragging = false;
+  let startX = 0;
+  let startWidth = USERS_PANEL_DEFAULT;
+
+  const onMove = (event) => {
+    if (!dragging) return;
+    applyUsersPanelWidth(startWidth + (startX - event.clientX));
+  };
+  const stop = () => {
+    if (!dragging) return;
+    dragging = false;
+    els.usersResizer.classList.remove('is-active');
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', stop);
+    document.removeEventListener('pointercancel', stop);
+    applyUsersPanelWidth(els.usersPanel.getBoundingClientRect().width, { persist: true });
+  };
+
+  els.usersResizer.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    dragging = true;
+    startX = event.clientX;
+    startWidth = els.usersPanel.getBoundingClientRect().width;
+    els.usersResizer.classList.add('is-active');
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', stop);
+    document.addEventListener('pointercancel', stop);
+    event.preventDefault();
+  });
+
+  els.usersResizer.addEventListener('dblclick', () => {
+    applyUsersPanelWidth(USERS_PANEL_DEFAULT, { persist: true });
+  });
+
+  els.usersResizer.addEventListener('keydown', (event) => {
+    const current = els.usersPanel.getBoundingClientRect().width;
+    if (event.key === 'ArrowLeft') {
+      applyUsersPanelWidth(current + 16, { persist: true });
+    } else if (event.key === 'ArrowRight') {
+      applyUsersPanelWidth(current - 16, { persist: true });
+    } else if (event.key === 'Home') {
+      applyUsersPanelWidth(USERS_PANEL_DEFAULT, { persist: true });
+    } else {
+      return;
+    }
+    event.preventDefault();
+  });
+
+  window.addEventListener('resize', () => {
+    applyUsersPanelWidth(els.usersPanel.getBoundingClientRect().width);
   });
 }
 
