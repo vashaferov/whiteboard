@@ -23,6 +23,7 @@ from app.services.images import ImageStorage, LocalImageStorage
 from app.services.storage import SnapshotStore
 from app.services.workspaces import (
     DEFAULT_WORKSPACE_ID,
+    PRESENTATION_KIND,
     assign_orphan_objects,
     new_workspace_id,
     next_workspace_name,
@@ -208,11 +209,26 @@ class Room:
     def get_workspace(self, workspace_id: str) -> dict[str, Any] | None:
         return self.workspaces.get(workspace_id)
 
-    def add_workspace(self, name: str) -> dict[str, Any]:
+    def add_workspace(
+        self,
+        name: str,
+        kind: str = "page",
+        slides: list[str] | None = None,
+    ) -> dict[str, Any]:
         position = (
             max((workspace["position"] for workspace in self.workspaces.values()), default=-1) + 1
         )
-        workspace = {"id": new_workspace_id(), "name": name, "position": position}
+        workspace: dict[str, Any] = {
+            "id": new_workspace_id(),
+            "name": name,
+            "position": position,
+        }
+        if kind == PRESENTATION_KIND:
+            workspace.update(
+                kind=PRESENTATION_KIND,
+                slides=list(slides or []),
+                slideIndex=0,
+            )
         self.workspaces[workspace["id"]] = workspace
         return workspace
 
@@ -616,12 +632,24 @@ class RoomManager:
         self.mark_dirty(room)
 
     def objects_for(self, room: Room, workspace_id: str) -> list[dict[str, Any]]:
-        return room.objects_in(workspace_id)
+        objects = room.objects_in(workspace_id)
+        workspace = room.get_workspace(workspace_id)
+        if workspace is not None and workspace.get("kind") == PRESENTATION_KIND:
+            slide = int(workspace.get("slideIndex", 0) or 0)
+            return [obj for obj in objects if int(obj.get("slide", 0) or 0) == slide]
+        return objects
 
-    def create_workspace(self, room: Room, name: str | None = None) -> dict[str, Any]:
+    def create_workspace(
+        self,
+        room: Room,
+        name: str | None = None,
+        *,
+        kind: str = "page",
+        slides: list[str] | None = None,
+    ) -> dict[str, Any]:
         if name is None:
             name = next_workspace_name(room.workspace_list())
-        workspace = room.add_workspace(name)
+        workspace = room.add_workspace(name, kind=kind, slides=slides)
         self.mark_dirty(room)
         return workspace
 

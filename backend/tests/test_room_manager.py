@@ -234,6 +234,21 @@ async def test_objects_and_clear_are_scoped(tmp_path: Path) -> None:
     await store.close()
 
 
+async def test_objects_for_filters_presentation_slide(tmp_path: Path) -> None:
+    _, store, manager = build_manager(tmp_path)
+    room = await manager.get_or_create("r1")
+    workspace = manager.create_workspace(
+        room, "Урок", kind="presentation", slides=["/uploads/a.jpg", "/uploads/b.jpg"]
+    )
+    manager.add_object(room, {**SAMPLE_OBJECT, "id": "s0", "slide": 0}, workspace["id"])
+    manager.add_object(room, {**SAMPLE_OBJECT, "id": "s1", "slide": 1}, workspace["id"])
+    assert [obj["id"] for obj in manager.objects_for(room, workspace["id"])] == ["s0"]
+    workspace["slideIndex"] = 1
+    assert [obj["id"] for obj in manager.objects_for(room, workspace["id"])] == ["s1"]
+    await manager.shutdown()
+    await store.close()
+
+
 async def test_broadcast_filters_by_workspace(tmp_path: Path) -> None:
     _, store, manager = build_manager(tmp_path)
     room = await manager.get_or_create("r1")
