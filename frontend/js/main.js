@@ -174,6 +174,7 @@ function cacheElements() {
   els.widthValue = $('#width-value');
   els.clearBtn = $('#clear-btn');
   els.imageBtn = $('#image-btn');
+  els.undoBtn = $('#undo-btn');
   els.lockBtn = $('#lock-btn');
   els.leaveBtn = $('#leave-btn');
   els.fileInput = $('#file-input');
@@ -385,6 +386,7 @@ function bindToolbar() {
 
   els.imageBtn.addEventListener('click', () => els.fileInput.click());
   els.fileInput.addEventListener('change', uploadImage);
+  els.undoBtn.addEventListener('click', requestUndo);
   els.leaveBtn.addEventListener('click', () => leaveRoom('Вы вышли из комнаты'));
   els.lockBtn.addEventListener('click', () => {
     const id = state.board?.getSelectedId();
@@ -426,6 +428,11 @@ function updateLockButton() {
   if (!object) return;
   els.lockBtn.classList.toggle('is-active', Boolean(object.locked));
   els.lockBtn.title = object.locked ? 'Снять блокировку' : 'Заблокировать';
+}
+
+function requestUndo() {
+  if (!state.board || state.tools?.isDrawing()) return;
+  sendWorkspace({ type: 'undo' });
 }
 
 function selectedFrame() {
@@ -826,6 +833,7 @@ function handleServerEvent(message) {
     case 'text_update':
     case 'object_delete':
     case 'object_lock':
+    case 'objects_restored':
     case 'clear':
     case 'cursor':
       applyWorkspaceEvent(message);
@@ -927,6 +935,11 @@ function applyObjectEvent(message) {
       break;
     case 'object_lock':
       board.setObjectLocked(message.objectId, message.locked);
+      updateFramePanel();
+      updateLockButton();
+      break;
+    case 'objects_restored':
+      board.applyObjectsRestored(message);
       updateFramePanel();
       updateLockButton();
       break;
@@ -1199,7 +1212,14 @@ function bindKeyboard() {
   document.addEventListener('keydown', (event) => {
     const target = event.target;
     if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.ctrlKey || event.metaKey) {
+      if (event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        requestUndo();
+      }
+      return;
+    }
+    if (event.altKey) return;
 
     const tool = TOOL_KEYS[event.key.toLowerCase()];
     if (tool) {

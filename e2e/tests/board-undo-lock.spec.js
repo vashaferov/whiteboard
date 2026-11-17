@@ -78,6 +78,15 @@ async function shapePosition(page) {
   });
 }
 
+async function firstPosition(page) {
+  return page.evaluate(() => {
+    const group = window.Konva.stages[0]
+      .getLayers()[1]
+      .getChildren((node) => Boolean(node.id()))[0];
+    return group ? { x: Math.round(group.x()), y: Math.round(group.y()) } : null;
+  });
+}
+
 test('lock: a student cannot move a locked block, teacher can unlock', async ({
   browser,
   request,
@@ -153,3 +162,55 @@ test('lock: a locked frame holds its children', async ({ browser, request }) => 
   }
 });
 
+
+
+test('undo: removes a created shape and restores an erased stroke', async ({ browser, request }) => {
+  const setup = await lessonSetup(request, { name: 'Undo', student: true });
+  const { teacherContext, studentContext, teacher, student } = await openLesson(
+    request,
+    browser,
+    setup,
+  );
+  try {
+    await drawRect(teacher, { x: 200, y: 200 }, { x: 300, y: 280 });
+    await expect.poll(() => objectCount(student)).toBe(1);
+    await teacher.click('#undo-btn');
+    await expect.poll(() => objectCount(student)).toBe(0);
+
+    await drawWithTool(student, 'brush', { x: 400, y: 300 }, { x: 600, y: 300 });
+    await expect.poll(() => objectCount(teacher)).toBe(1);
+    await eraseAt(student, { x: 420, y: 300 }, { x: 580, y: 300 });
+    await expect.poll(() => objectCount(student)).toBe(0);
+    await student.click('#undo-btn');
+    await expect.poll(() => objectCount(student)).toBe(1);
+    await expect.poll(() => objectCount(teacher)).toBe(1);
+  } finally {
+    await teacherContext.close();
+    await studentContext.close();
+  }
+});
+
+test('undo: ctrl+z restores a moved object and empty history toasts', async ({ browser, request }) => {
+  const setup = await lessonSetup(request, { name: 'Undo move', student: false });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await signInWith(request, page, setup.teacherLogin);
+  await openRoom(page, setup.room.id);
+
+  await drawRect(page, { x: 100, y: 100 }, { x: 220, y: 180 });
+  await page.click('[data-tool="select"]');
+  const before = await firstPosition(page);
+  const start = await worldToScreen(page, { x: 100, y: 140 });
+  await dragBy(page, start, 140, 80);
+  await expect.poll(async () => (await firstPosition(page)).x).toBeGreaterThan(before.x + 100);
+
+  await page.keyboard.press('Control+z');
+  await expect.poll(async () => (await firstPosition(page)).x).toBe(before.x);
+
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => objectCount(page)).toBe(0);
+  await page.keyboard.press('Control+z');
+  await expect(page.locator('#toast')).toHaveText('Нечего отменять');
+
+  await context.close();
+});

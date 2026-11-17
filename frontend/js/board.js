@@ -701,6 +701,23 @@ export class Board {
     if (this.selectedId === object.id) this.transformer.forceUpdate();
   }
 
+  applyObjectsRestored({ removedIds = [], objects = [] } = {}) {
+    for (const id of removedIds) this.removeObject(id);
+    for (const item of objects) {
+      const object = item?.object;
+      if (!object || !object.id) continue;
+      if (this.objects.has(object.id)) {
+        this.applyObjectTransform(object);
+        if (this.selectedId === object.id) this.selectObject(object.id);
+      } else {
+        this.addObject(object);
+      }
+      const entry = this.objects.get(object.id);
+      if (entry) this._applyLockBadge(entry);
+    }
+    this.contentLayer.batchDraw();
+  }
+
   getObjectData(objectId) {
     return this.objects.get(objectId)?.data ?? null;
   }
