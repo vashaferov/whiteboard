@@ -61,27 +61,34 @@ compose pull whiteboard
 log "starting $PROJECT"
 compose up -d --no-build --remove-orphans
 
-container_id=$(compose ps -q whiteboard)
-attempt=0
-while [ "$attempt" -lt 30 ]; do
+wait_healthy() {
+  service=$1
+  container_id=$(compose ps -q "$service")
+  attempt=0
   status=""
-  if [ -n "$container_id" ]; then
-    status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
-      "$container_id" 2>/dev/null || true)
-  fi
-  if [ "$status" = "healthy" ]; then
-    break
-  fi
-  attempt=$((attempt + 1))
-  sleep 2
-done
-
-if [ "${status:-}" != "healthy" ]; then
-  log "health check failed: $PROJECT/whiteboard"
+  while [ "$attempt" -lt 30 ]; do
+    if [ -n "$container_id" ]; then
+      status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+        "$container_id" 2>/dev/null || true)
+    fi
+    if [ "$status" = "healthy" ]; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 2
+  done
+  log "health check failed: $PROJECT/$service"
   compose ps || true
-  compose logs --tail=80 whiteboard || true
-  exit 1
-fi
+  compose logs --tail=80 "$service" || true
+  return 1
+}
+
+wait_healthy whiteboard
+wait_healthy edge
+
+# Pick up a renewed certificate without recreating the container.
+compose exec -T edge caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile \
+  >/dev/null 2>&1 || true
 
 if [ -n "${PUBLIC_HEALTH_URL:-}" ]; then
   log "checking $PUBLIC_HEALTH_URL"

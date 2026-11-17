@@ -1,15 +1,55 @@
-# Production stack for a VDS that already runs other containers behind a shared
-# reverse proxy (nginx/Caddy/Traefik). It deliberately:
+# Production stack for a VDS that already runs other containers.
+# It deliberately:
 #   * uses its own compose project name, network and volumes;
-#   * binds the app to loopback only and never touches ports 80/443;
+#   * keeps the app on loopback and serves TLS on a dedicated port (8443);
+#   * never touches ports 80/443 or the existing reverse proxy;
+#   * reuses the domain certificate from the existing nginx-certbot volume;
 #   * keeps images in a local uploads volume instead of running SeaweedFS.
 #
-# The existing proxy must forward the board domain to 127.0.0.1:${WB_PORT}.
 # See docs/deploy-vds.md for the full runbook.
 
 name: whiteboard-prod
 
 services:
+  # TLS edge on a dedicated port (default 8443). It reuses the certificate of
+  # the existing nginx-certbot stack read-only; the board domain therefore stays
+  # the main domain and ports 80/443 remain owned by the existing proxy.
+  edge:
+    image: caddy:2.8-alpine
+    ports:
+      - "${WB_HTTPS_PORT:-8443}:${WB_HTTPS_PORT:-8443}"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      HTTPS_PORT: ${WB_HTTPS_PORT:-8443}
+    volumes:
+      - ./deploy/Caddyfile.edge:/etc/caddy/Caddyfile:ro
+      - ${TLS_CERTS_DIR:?Set TLS_CERTS_DIR in .env}:/certs:ro
+      - edge-data:/data
+      - edge-config:/config
+    depends_on:
+      whiteboard:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:2019/config/",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   whiteboard:
     image: ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER in .env}/${GHCR_REPO:-whiteboard}:${WB_TAG:-latest}
     build: .
@@ -77,3 +117,5 @@ volumes:
   whiteboard-data:
   whiteboard-uploads:
   redis-data:
+  edge-data:
+  edge-config:

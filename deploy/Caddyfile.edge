@@ -1,0 +1,12 @@
+{
+	# No ACME: the domain certificate is reused read-only from the existing
+	# nginx-certbot volume. Reload this proxy after the certificate renews.
+	auto_https off
+	admin 127.0.0.1:2019
+}
+
+{$DOMAIN}:{$HTTPS_PORT} {
+	tls /certs/live/{$DOMAIN}/fullchain.pem /certs/live/{$DOMAIN}/privkey.pem
+	encode zstd gzip
+	reverse_proxy whiteboard:8000
+}
