@@ -1111,15 +1111,18 @@ async def _handle_undo(
 
 def _undo_fields_apply(user: ConnectedUser, room: Room, entry: dict[str, Any]) -> bool:
     fields: dict[str, dict[str, Any]] = entry.get("fields") or {}
-    applicable = [
-        (object_id, patch)
-        for object_id, patch in fields.items()
-        if (obj := room.get_object(object_id)) is not None and not _locked_for(user, room, obj)
-    ]
-    if not applicable:
+    targets: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for object_id, patch in fields.items():
+        obj = room.get_object(object_id)
+        if obj is None:
+            continue
+        if _locked_for(user, room, obj):
+            return False
+        targets.append((obj, patch))
+    if not targets:
         return False
-    for object_id, patch in applicable:
-        room.get_object(object_id).update(copy.deepcopy(patch))
+    for obj, patch in targets:
+        obj.update(copy.deepcopy(patch))
     return True
 
 
@@ -1128,9 +1131,17 @@ def _undo_created_apply(user: ConnectedUser, room: Room, entry: dict[str, Any]) 
     targets = [obj for obj in (room.get_object(object_id) for object_id in created) if obj]
     if not targets:
         return None
+    field_targets = [room.get_object(object_id) for object_id in (entry.get("fields") or {})]
+    if any(target is not None and _locked_for(user, room, target) for target in field_targets):
+        return None
     removed: list[str] = []
     for obj in targets:
         if _locked_for(user, room, obj):
+            return None
+        if obj.get("type") == "frame" and any(
+            child.get("frameId") == obj["id"] and _locked_for(user, room, child)
+            for child in room.objects
+        ):
             return None
         cascade = [] if obj.get("type") == "frame" else _deletion_cascade(room, obj)
         removed.extend([str(obj["id"]), *cascade])

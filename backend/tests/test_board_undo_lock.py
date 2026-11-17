@@ -334,3 +334,30 @@ def test_undo_skips_locked_object_for_student(client: TestClient, login_user) ->
 
         sw.send_json({"type": "undo"})
         assert codes(flush(sw)) == ["undo_empty"]
+
+
+def test_undo_frame_move_skips_when_child_locked(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+    with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
+        tw.receive_json()
+        sw.receive_json()
+        tw.receive_json()
+        sw.send_json(frame("frame-1"))
+        recv_until(tw, "frame_add")
+        sw.send_json(shape("inner"))
+        recv_until(tw, "shape_add")
+        sw.send_json({"type": "frame_move", "objectId": "frame-1", "x": 50, "y": 40})
+        recv_until(tw, "frame_moved")
+        tw.send_json({"type": "object_lock", "objectId": "inner", "locked": True})
+        recv_until(sw, "object_lock")
+
+        sw.send_json({"type": "undo"})
+        messages = flush(sw)
+        assert codes(messages) == ["undo_empty"], messages
+
+    observer = login_user("Наблюдатель", "student")
+    with ws_connect(client, observer["token"]) as ow:
+        objects = {obj["id"]: obj for obj in ow.receive_json()["objects"]}
+        assert (objects["frame-1"]["x"], objects["frame-1"]["y"]) == (50, 40)
+        assert objects["inner"]["locked"] is True

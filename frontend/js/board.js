@@ -772,7 +772,8 @@ export class Board {
       });
       entry.node.add(badge);
     }
-    const box = entry.node.getClientRect({ relativeTo: entry.node, skipShadow: true });
+    const box = (entry.node.getChildren((child) => child.name() !== 'lock-badge')[0] ?? entry.node)
+      .getClientRect({ relativeTo: entry.node, skipShadow: true });
     badge.position({ x: box.x + box.width - LOCK_BADGE_SIZE, y: box.y + 2 });
     entry.node.getLayer()?.batchDraw();
   }
@@ -789,6 +790,12 @@ export class Board {
       }
     }
     if (entry.data.id === this.selectedId) this.selectObject(objectId);
+    else if (
+      entry.data.type === 'frame' &&
+      this.objects.get(this.selectedId)?.data.frameId === objectId
+    ) {
+      this.selectObject(this.selectedId);
+    }
     this.contentLayer.batchDraw();
   }
 
