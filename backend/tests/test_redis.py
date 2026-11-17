@@ -738,3 +738,61 @@ async def test_object_lock_is_shared(settings, tmp_path, redis_pair) -> None:
 
     await manager_a.shutdown()
     await manager_b.shutdown()
+
+
+async def test_objects_restored_is_shared(settings, tmp_path, redis_pair) -> None:
+    first_redis, second_redis = redis_pair
+    manager_a = make_manager(settings, tmp_path, "undo-a", first_redis)
+    manager_b = make_manager(settings, tmp_path, "undo-b", second_redis)
+    room_a = await manager_a.get_or_create("room-undo")
+    room_b = await manager_b.get_or_create("room-undo")
+
+    obj = {
+        "id": "restored",
+        "type": "shape",
+        "shapeType": "rect",
+        "author": "u",
+        "workspaceId": "ws_default",
+        "x": 0,
+        "y": 0,
+        "width": 40,
+        "height": 40,
+    }
+    manager_a.add_object(room_a, obj, "ws_default")
+    await manager_a.broadcast(
+        room_a,
+        {
+            "type": "shape_add",
+            "id": "u",
+            "object": obj,
+            "workspaceId": "ws_default",
+        },
+    )
+    await wait_for(lambda: room_b.get_object("restored") is not None)
+
+    obj["x"] = 77
+    await manager_a.broadcast(
+        room_a,
+        {
+            "type": "objects_restored",
+            "removedIds": [],
+            "objects": [{"index": None, "object": obj}],
+            "workspaceId": "ws_default",
+        },
+    )
+    await wait_for(lambda: room_b.get_object("restored").get("x") == 77)
+
+    room_a.remove_object("restored")
+    await manager_a.broadcast(
+        room_a,
+        {
+            "type": "objects_restored",
+            "removedIds": ["restored"],
+            "objects": [],
+            "workspaceId": "ws_default",
+        },
+    )
+    await wait_for(lambda: room_b.get_object("restored") is None)
+
+    await manager_a.shutdown()
+    await manager_b.shutdown()

@@ -60,6 +60,7 @@ WORKSPACE_SCOPED_EVENTS = {
     "text_update",
     "object_delete",
     "object_lock",
+    "objects_restored",
     "clear",
     "cursor",
     "cursor_remove",
@@ -156,6 +157,8 @@ class Room:
         self.index: dict[str, dict[str, Any]] = {
             str(obj["id"]): obj for obj in self.objects if isinstance(obj, dict) and "id" in obj
         }
+        # Personal undo stacks keyed by (user id, workspace id); memory only.
+        self.history: dict[tuple[str, str], list[dict[str, Any]]] = {}
         self.seq = seq
         self.workspaces: dict[str, dict[str, Any]] = {
             workspace["id"]: workspace for workspace in normalize_workspaces(workspaces)
@@ -340,6 +343,7 @@ class RoomManager:
         room = self.rooms.get(room_id)
         if room is None:
             return
+        self.clear_history(room, user_id)
         await self._remove_presence(room_id, user_id)
         await self._remove_users(room, [user_id], notify=notify)
 
@@ -571,6 +575,40 @@ class RoomManager:
             self.mark_dirty(room)
         return obj
 
+    # ------------------------------------------------------------------ history
+
+    def push_history(
+        self,
+        room: Room,
+        user_id: str,
+        workspace_id: str,
+        entry: dict[str, Any],
+        limit: int = 50,
+    ) -> None:
+        stack = room.history.setdefault((user_id, workspace_id), [])
+        stack.append(entry)
+        del stack[:-limit]
+
+    def pop_history(self, room: Room, user_id: str, workspace_id: str) -> dict[str, Any] | None:
+        stack = room.history.get((user_id, workspace_id))
+        if not stack:
+            return None
+        return stack.pop()
+
+    def clear_history(
+        self,
+        room: Room,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        for key in list(room.history):
+            owner, workspace = key
+            if user_id is not None and owner != user_id:
+                continue
+            if workspace_id is not None and workspace != workspace_id:
+                continue
+            room.history.pop(key, None)
+
     def clear_room(self, room: Room, workspace_id: str | None = None) -> None:
         if workspace_id is None:
             workspace_id = room.workspace_ids()[0]
@@ -625,6 +663,7 @@ class RoomManager:
     ) -> bool:
         if room.get_workspace(workspace_id) is None:
             return False
+        self.clear_history(room, user.id)
         async with user.workspace_lock:
             old_id = user.workspace_id
             if old_id == workspace_id:
@@ -1072,6 +1111,17 @@ class RoomManager:
                 await self._redis.hset(
                     objects_key, str(obj["id"]), json.dumps(obj, ensure_ascii=False)
                 )
+        elif kind == "objects_restored":
+            removed = [str(object_id) for object_id in message.get("removedIds", [])]
+            if removed:
+                await self._redis.hdel(objects_key, *removed)
+            for item in message.get("objects", []):
+                obj = item.get("object") if isinstance(item, dict) else None
+                if isinstance(obj, dict) and isinstance(obj.get("id"), str):
+                    await self._redis.hset(
+                        objects_key, str(obj["id"]), json.dumps(obj, ensure_ascii=False)
+                    )
+            await self._redis.set(self._seq_key(room.id), room.seq)
         elif kind == "frame_captured":
             for object_id in message.get("objectIds", []):
                 obj = room.get_object(str(object_id))
@@ -1152,6 +1202,25 @@ class RoomManager:
             if obj is not None:
                 obj["locked"] = bool(message.get("locked"))
                 changed = True
+        elif kind == "objects_restored":
+            for object_id in message.get("removedIds", []):
+                room.remove_object(str(object_id))
+            for item in message.get("objects", []):
+                obj = item.get("object") if isinstance(item, dict) else None
+                if not isinstance(obj, dict) or not isinstance(obj.get("id"), str):
+                    continue
+                existing = room.get_object(obj["id"])
+                if existing is not None:
+                    existing.update(obj)
+                else:
+                    index = item.get("index")
+                    position = len(room.objects)
+                    if isinstance(index, int):
+                        position = min(max(index, 0), len(room.objects))
+                    room.objects.insert(position, obj)
+                    room.index[str(obj["id"])] = obj
+                room.seq = max(room.seq, int(obj.get("seq", 0) or 0))
+            changed = True
         elif kind == "frame_captured":
             frame_id = message.get("frameId")
             for object_id in message.get("objectIds", []):

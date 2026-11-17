@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 from typing import Any
@@ -32,6 +33,7 @@ from app.models.schemas import (
     StrokeStart,
     TextAdd,
     TextUpdate,
+    Undo,
     WorkspaceCreate,
     WorkspaceDelete,
     WorkspaceMoveAck,
@@ -97,6 +99,50 @@ def _locked_for(user: ConnectedUser, room: Room, obj: dict[str, Any]) -> bool:
     frame_id = obj.get("frameId")
     frame = room.get_object(str(frame_id)) if frame_id else None
     return bool(frame and frame.get("locked"))
+
+
+def _push_create(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    object_id: str,
+    fields: dict[str, Any] | None = None,
+) -> None:
+    manager.push_history(
+        room,
+        user.id,
+        user.workspace_id,
+        {"created": [object_id], "fields": fields or {}},
+    )
+
+
+def _push_fields(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    objects: list[dict[str, Any] | None],
+    names: tuple[str, ...],
+) -> None:
+    fields = {
+        str(obj["id"]): {name: copy.deepcopy(obj.get(name)) for name in names}
+        for obj in objects
+        if obj is not None
+    }
+    manager.push_history(room, user.id, user.workspace_id, {"fields": fields})
+
+
+def _push_delete(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    objects: list[dict[str, Any]],
+) -> None:
+    deleted = [
+        {"index": room.objects.index(obj), "object": copy.deepcopy(obj)}
+        for obj in objects
+        if obj in room.objects
+    ]
+    manager.push_history(room, user.id, user.workspace_id, {"deleted": deleted})
 
 
 def _frame_rect(frame: dict[str, Any]) -> tuple[float, float, float, float]:
@@ -171,7 +217,7 @@ def _capture_into_frame(
         anchor = _object_anchor(obj)
         if anchor is None or not _frame_contains(frame, anchor):
             continue
-        previous[str(obj["id"])] = obj.get("frameId")
+        previous[str(obj["id"])] = {"frameId": obj.get("frameId")}
         obj["frameId"] = frame["id"]
         captured.append(str(obj["id"]))
     return captured, previous
@@ -380,6 +426,8 @@ async def _handle_message(
         await _handle_object_delete(manager, room, user, message)
     elif isinstance(message, ObjectLock):
         await _handle_object_lock(manager, room, user, message)
+    elif isinstance(message, Undo):
+        await _handle_undo(manager, room, user, message)
     elif isinstance(message, Cursor):
         await _handle_cursor(manager, room, user, message)
     elif isinstance(message, Clear):
@@ -482,6 +530,7 @@ async def _handle_stroke_end(
         await manager.send_to(user, _error("room_full", "Достигнут лимит объектов на доске"))
         return
     manager.add_object(room, obj, user.workspace_id)
+    _push_create(manager, room, user, message.objectId)
     await manager.broadcast(
         room,
         {"type": "stroke_end", "id": user.id, "object": obj, "workspaceId": user.workspace_id},
@@ -518,6 +567,7 @@ async def _handle_shape_add(
     )
     _attach_to_frame(room, obj, user)
     manager.add_object(room, obj, user.workspace_id)
+    _push_create(manager, room, user, message.objectId)
     await manager.broadcast(
         room,
         {"type": "shape_add", "id": user.id, "object": obj, "workspaceId": user.workspace_id},
@@ -567,6 +617,7 @@ async def _handle_connector_add(
         strokeWidth=message.strokeWidth,
     )
     manager.add_object(room, obj, user.workspace_id)
+    _push_create(manager, room, user, message.objectId)
     await manager.broadcast(
         room,
         {
@@ -614,7 +665,8 @@ async def _handle_frame_add(
         exclude=user.id,
         workspace_id=user.workspace_id,
     )
-    captured, _previous = _capture_into_frame(room, obj, user)
+    captured, previous = _capture_into_frame(room, obj, user)
+    _push_create(manager, room, user, message.objectId, previous)
     if captured:
         manager.mark_dirty(room)
         await manager.broadcast(
@@ -652,6 +704,20 @@ async def _handle_frame_move(
         await manager.send_to(user, _error("forbidden", "Можно двигать только свои фреймы"))
         return
 
+    _push_fields(
+        manager,
+        room,
+        user,
+        [
+            obj,
+            *(
+                child
+                for child in room.objects
+                if child.get("frameId") == obj["id"] and child.get("type") != "connector"
+            ),
+        ],
+        ("x", "y"),
+    )
     dx = message.x - float(obj.get("x", 0))
     dy = message.y - float(obj.get("y", 0))
     obj["x"] = message.x
@@ -698,6 +764,7 @@ async def _handle_frame_style(
     if not _can_edit_object(user, obj):
         await manager.send_to(user, _error("forbidden", "Можно менять только свои фреймы"))
         return
+    _push_fields(manager, room, user, [obj], ("fill", "pattern"))
     manager.update_object_fields(room, message.objectId, fill=message.fill, pattern=message.pattern)
     await manager.broadcast(
         room,
@@ -738,6 +805,7 @@ async def _handle_text_add(
     )
     _attach_to_frame(room, obj, user)
     manager.add_object(room, obj, user.workspace_id)
+    _push_create(manager, room, user, message.objectId)
     await manager.broadcast(
         room,
         {"type": "text_add", "id": user.id, "object": obj, "workspaceId": user.workspace_id},
@@ -774,6 +842,7 @@ async def _handle_image_add(
     )
     _attach_to_frame(room, obj, user)
     manager.add_object(room, obj, user.workspace_id)
+    _push_create(manager, room, user, message.objectId)
     await manager.broadcast(
         room,
         {"type": "image_add", "id": user.id, "object": obj, "workspaceId": user.workspace_id},
@@ -797,6 +866,7 @@ async def _handle_object_update(
     if not _can_edit_object(user, obj):
         await manager.send_to(user, _error("forbidden", "Можно перемещать только свои объекты"))
         return
+    _push_fields(manager, room, user, [obj], ("x", "y", "frameId"))
     manager.update_object(room, message.objectId, message.x, message.y)
     _attach_to_frame(room, obj, user)
     await manager.broadcast(
@@ -863,6 +933,17 @@ async def _handle_object_transform(
         if message.height is not None and message.height != 0:
             fields["height"] = message.height
 
+    names = ("x", "y", "frameId")
+    names += (
+        ("rotation", "fontSize")
+        if obj.get("type") == "text"
+        else (
+            "width",
+            "height",
+            "rotation",
+        )
+    )
+    _push_fields(manager, room, user, [obj], names)
     updated = manager.update_object_fields(room, message.objectId, **fields)
     if updated is None:
         return
@@ -903,6 +984,7 @@ async def _handle_text_update(
     if not content:
         await manager.send_to(user, _error("invalid_message", "Текст не может быть пустым"))
         return
+    _push_fields(manager, room, user, [obj], ("content",))
     updated = manager.update_object_fields(room, message.objectId, content=content)
     if updated is None:
         return
@@ -948,6 +1030,8 @@ async def _handle_object_delete(
             return
 
     cascade_ids = _deletion_cascade(room, obj)
+    targets = [obj, *(room.get_object(cascade_id) for cascade_id in cascade_ids)]
+    _push_delete(manager, room, user, [target for target in targets if target is not None])
     for cascade_id in cascade_ids:
         manager.delete_object(room, cascade_id)
 
@@ -977,6 +1061,105 @@ async def _handle_object_delete(
         )
 
 
+async def _handle_undo(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: Undo,
+) -> None:
+    if not await _check_workspace(manager, user, message):
+        return
+    for _ in range(50):
+        entry = manager.pop_history(room, user.id, user.workspace_id)
+        if entry is None:
+            break
+        removed: list[str] = []
+        objects: list[dict[str, Any]] = []
+        if entry.get("created"):
+            created = _undo_created_apply(user, room, entry)
+            if created is None:
+                continue
+            removed = created
+        elif entry.get("deleted"):
+            deleted = _undo_deleted_apply(user, room, entry)
+            if deleted is None:
+                continue
+            removed, objects = deleted
+        elif entry.get("fields"):
+            if not _undo_fields_apply(user, room, entry):
+                continue
+        else:
+            continue
+        for object_id in entry.get("fields") or {}:
+            obj = room.get_object(object_id)
+            if obj is not None:
+                objects.append({"index": None, "object": copy.deepcopy(obj)})
+        manager.mark_dirty(room)
+        await manager.broadcast(
+            room,
+            {
+                "type": "objects_restored",
+                "removedIds": removed,
+                "objects": objects,
+                "workspaceId": user.workspace_id,
+            },
+            workspace_id=user.workspace_id,
+        )
+        return
+    await manager.send_to(user, _error("undo_empty", "Нечего отменять"))
+
+
+def _undo_fields_apply(user: ConnectedUser, room: Room, entry: dict[str, Any]) -> bool:
+    fields: dict[str, dict[str, Any]] = entry.get("fields") or {}
+    applicable = [
+        (object_id, patch)
+        for object_id, patch in fields.items()
+        if (obj := room.get_object(object_id)) is not None and not _locked_for(user, room, obj)
+    ]
+    if not applicable:
+        return False
+    for object_id, patch in applicable:
+        room.get_object(object_id).update(copy.deepcopy(patch))
+    return True
+
+
+def _undo_created_apply(user: ConnectedUser, room: Room, entry: dict[str, Any]) -> list[str] | None:
+    created: list[str] = entry.get("created") or []
+    targets = [obj for obj in (room.get_object(object_id) for object_id in created) if obj]
+    if not targets:
+        return None
+    removed: list[str] = []
+    for obj in targets:
+        if _locked_for(user, room, obj):
+            return None
+        cascade = [] if obj.get("type") == "frame" else _deletion_cascade(room, obj)
+        removed.extend([str(obj["id"]), *cascade])
+    for object_id in removed:
+        room.remove_object(object_id)
+    for object_id, patch in (entry.get("fields") or {}).items():
+        target = room.get_object(object_id)
+        if target is not None:
+            target.update(copy.deepcopy(patch))
+    return removed
+
+
+def _undo_deleted_apply(
+    user: ConnectedUser, room: Room, entry: dict[str, Any]
+) -> tuple[list[str], list[dict[str, Any]]] | None:
+    deleted: list[dict[str, Any]] = entry.get("deleted") or []
+    absent = [item for item in deleted if room.get_object(str(item["object"]["id"])) is None]
+    if not absent:
+        return None
+    restored: list[dict[str, Any]] = []
+    for item in sorted(absent, key=lambda item: item["index"]):
+        obj = copy.deepcopy(item["object"])
+        room.objects.insert(min(item["index"], len(room.objects)), obj)
+        room.index[str(obj["id"])] = obj
+        room.seq = max(room.seq, int(obj.get("seq", 0) or 0))
+        restored.append({"index": item["index"], "object": obj})
+    return [], restored
+
+
 async def _handle_object_lock(
     manager: RoomManager,
     room: Room,
@@ -989,6 +1172,7 @@ async def _handle_object_lock(
     obj = await _check_object_workspace(manager, room, user, message)
     if obj is None or bool(obj.get("locked")) == message.locked:
         return
+    _push_fields(manager, room, user, [obj], ("locked",))
     manager.update_object_fields(room, message.objectId, locked=message.locked)
     await manager.broadcast(
         room,
@@ -1038,6 +1222,7 @@ async def _handle_clear(
     if not await _check_workspace(manager, user, message):
         return
     manager.clear_room(room, user.workspace_id)
+    manager.clear_history(room)
     await manager.broadcast(
         room,
         {"type": "clear", "id": user.id, "workspaceId": user.workspace_id},
@@ -1061,6 +1246,8 @@ async def _handle_kick(
         return
     if not await manager.kick(room.id, message.clientId):
         await manager.send_to(user, _error("user_not_found", "Участник не найден"))
+        return
+    manager.clear_history(room, message.clientId)
 
 
 async def _handle_workspace_switch(
@@ -1135,6 +1322,7 @@ async def _handle_workspace_delete(
         room,
         {"type": "workspace_deleted", "workspaceId": deleted["id"], "fallbackId": fallback},
     )
+    manager.clear_history(room, workspace_id=deleted["id"])
     await manager.move_users_from_deleted(room, deleted["id"], fallback)
 
 

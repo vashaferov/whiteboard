@@ -302,6 +302,10 @@ class ObjectLock(_Message):
     locked: bool
 
 
+class Undo(_Message):
+    type: Literal["undo"]
+
+
 class Cursor(_Message):
     type: Literal["cursor"]
     x: float = Field(ge=COORD_MIN, le=COORD_MAX)
@@ -407,6 +411,7 @@ ClientMessage = Annotated[
     | TextUpdate
     | ObjectDelete
     | ObjectLock
+    | Undo
     | Cursor
     | Clear
     | Kick
