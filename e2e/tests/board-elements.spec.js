@@ -344,6 +344,19 @@ function rectPositions(page) {
   );
 }
 
+function frameBackground(page) {
+  return page.evaluate(() => {
+    const layer = window.Konva.stages[0].getLayers()[1];
+    const frame = layer.getChildren((node) => Boolean(node.findOne('.frame-bg')))[0];
+    const background = frame?.findOne('.frame-bg');
+    const pattern = frame?.findOne('.frame-pattern');
+    return {
+      fill: background ? background.fill() : null,
+      pattern: pattern ? pattern.getAttr('pattern') : null,
+    };
+  });
+}
+
 test('frames: backgrounds, captured children and moving together', async ({ browser, request }) => {
   const setup = await lessonSetup(request, { name: 'Frames', student: false });
   const context = await browser.newContext();
@@ -359,17 +372,12 @@ test('frames: backgrounds, captured children and moving together', async ({ brow
   await expect(teacher.locator('#frame-panel')).toBeVisible();
 
   await teacher.click('#frame-pattern-grid');
-  await expect
-    .poll(() =>
-      teacher.evaluate(() => {
-        const layer = window.Konva.stages[0].getLayers()[1];
-        const frame = layer.getChildren((node) => Boolean(node.findOne('.frame-bg')))[0];
-        return frame?.findOne('.frame-pattern')?.getAttr('pattern');
-      }),
-    )
-    .toBe('grid');
+  await expect.poll(async () => (await frameBackground(teacher)).pattern).toBe('grid');
 
-  await teacher.locator('#frame-colors .frame-color').nth(2).click();
+  const fillButton = teacher.locator('#frame-colors .frame-color').nth(2);
+  const chosenFill = await fillButton.getAttribute('data-color');
+  await fillButton.click();
+  await expect.poll(async () => (await frameBackground(teacher)).fill).toBe(chosenFill);
 
   await drawWithTool(teacher, 'rect', { x: 250, y: 250 }, { x: 380, y: 340 });
   await expect.poll(() => objectCount(teacher)).toBe(2);
@@ -391,15 +399,8 @@ test('frames: backgrounds, captured children and moving together', async ({ brow
 
   await reloadAndWait(teacher);
   await expect.poll(() => objectCount(teacher)).toBe(2);
-  await expect
-    .poll(() =>
-      teacher.evaluate(() => {
-        const layer = window.Konva.stages[0].getLayers()[1];
-        const frame = layer.getChildren((node) => Boolean(node.findOne('.frame-bg')))[0];
-        return frame?.findOne('.frame-pattern')?.getAttr('pattern');
-      }),
-    )
-    .toBe('grid');
+  await expect.poll(async () => (await frameBackground(teacher)).pattern).toBe('grid');
+  await expect.poll(async () => (await frameBackground(teacher)).fill).toBe(chosenFill);
 
   await context.close();
 });

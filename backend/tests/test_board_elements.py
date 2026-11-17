@@ -358,6 +358,37 @@ def test_student_cannot_delete_frame_with_foreign_child(client: TestClient, logi
         assert "forbidden" in codes(barrier(student_ws))
 
 
+def test_student_deletes_own_frame_with_own_children(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+
+    with (
+        ws_connect(client, teacher["token"]) as teacher_ws,
+        ws_connect(client, student["token"]) as student_ws,
+    ):
+        teacher_ws.receive_json()
+        student_ws.receive_json()
+        teacher_ws.receive_json()
+
+        student_ws.send_json(frame("own-frame"))
+        assert "invalid_message" not in codes(flush(student_ws))
+        recv_until(teacher_ws, "frame_add")
+
+        student_ws.send_json({**shape("own-block"), "shapeType": "process"})
+        assert "invalid_message" not in codes(flush(student_ws))
+        attached = recv_until(teacher_ws, "shape_add")["object"]
+        assert attached["frameId"] == "own-frame"
+
+        student_ws.send_json({"type": "object_delete", "objectId": "own-frame"})
+        own = deleted(barrier(student_ws))
+        assert set(own) == {"own-block"}
+        assert set(deleted(barrier(teacher_ws))) == {"own-frame", "own-block"}
+
+    observer = login_user("Наблюдатель", "student")
+    with ws_connect(client, observer["token"]) as observer_ws:
+        assert observer_ws.receive_json()["objects"] == []
+
+
 def test_transform_recomputes_frame_id(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
