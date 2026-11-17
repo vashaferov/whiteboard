@@ -910,6 +910,7 @@ export class Board {
   eraseAt(point, radius) {
     const ids = [];
     for (const [id, entry] of [...this.objects.entries()]) {
+      if (entry.data.type !== 'stroke') continue;
       if (!this.deletePredicate(entry.data)) continue;
       if (this._isErased(entry, point, radius)) ids.push(id);
     }
