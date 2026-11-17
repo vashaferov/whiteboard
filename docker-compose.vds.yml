@@ -3,7 +3,7 @@
 #   * uses its own compose project name, network and volumes;
 #   * keeps the app on loopback and serves TLS on a dedicated port (8443);
 #   * never touches ports 80/443 or the existing reverse proxy;
-#   * reuses the domain certificate from the existing nginx-certbot volume;
+#   * issues and renews its own certificate through the shared ACME webroot;
 #   * keeps images in a local uploads volume instead of running SeaweedFS.
 #
 # See docs/deploy-vds.md for the full runbook.

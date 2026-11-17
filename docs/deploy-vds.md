@@ -16,8 +16,10 @@ compose-проектом `whiteboard-prod` и публикуется на **от
 - Свои тома: `whiteboard-prod_whiteboard-data`, `_whiteboard-uploads`,
   `_redis-data`, `_edge-data`, `_edge-config`.
 - Порты 80/443 не занимаются и существующий reverse proxy не изменяется.
-- TLS-сертификат `mediahlg.ru` переиспользуется **read-only** из каталога
-  существующего nginx-certbot (монтируется в `edge`); ACME не запускается.
+- TLS-сертификат `mediahlg.ru` выпускается отдельным certbot в нашем проекте:
+  ACME-челлендж пишется в webroot существующего nginx (порт 80), а сам
+  сертификат хранится в `TLS_CERTS_DIR`. Certbot-состояние существующего
+  nginx не изменяется.
 - Приложение слушает `127.0.0.1:8010` (диагностика/health), наружу его отдаёт
   `edge` на `8443`.
 - Картинки хранятся в томе `uploads` и отдаются приложением по `/uploads`,
@@ -45,7 +47,9 @@ cd ~/whiteboard
 | `COOKIE_SECURE` | `true` |
 | `DOMAIN` | `mediahlg.ru` |
 | `WB_HTTPS_PORT` | `8443` |
-| `TLS_CERTS_DIR` | `/home/vashaferov/duty/certbot-etc` (том существующего nginx-certbot) |
+| `TLS_CERTS_DIR` | `/home/vashaferov/whiteboard-certs` (собственное хранилище сертификата) |
+| `CERTBOT_EMAIL` | email для Let's Encrypt |
+| `CERTBOT_WEBROOT` | `/home/vashaferov/duty/certbot-www` (webroot существующего nginx) |
 | `GHCR_OWNER` | `vashaferov` |
 | `GHCR_REPO` | `whiteboard` |
 | `WB_TAG` | `latest` (workflow переопределяет тегом коммита) |
@@ -55,12 +59,14 @@ cd ~/whiteboard
 
 Права на файл: `chmod 600 .env`.
 
-Проверить, что сертификат читается из нового контейнера (read-only):
+Проверить, что существующий nginx отдаёт ACME-челленджи (dry-run, не меняет
+сертификаты):
 
 ```bash
-docker exec duty_nginx readlink -f /etc/letsencrypt/live/mediahlg.ru/fullchain.pem
-docker run --rm -v "$TLS_CERTS_DIR:/certs:ro" --entrypoint ls \
-  jonasal/nginx-certbot:latest /certs/live/mediahlg.ru
+docker run --rm \
+  -v /home/vashaferov/whiteboard-certs:/etc/letsencrypt \
+  -v /home/vashaferov/duty/certbot-www:/var/www/certbot \
+  certbot/certbot renew --dry-run --webroot -w /var/www/certbot
 ```
 
 Порт `8443` должен быть свободен и открыт в firewall/панели провайдера:
@@ -108,11 +114,25 @@ ssh -i ~/.ssh/whiteboard_deploy_ed25519 vashaferov@<VDS_HOST> "docker ps --forma
 - `TLS_CERTS_DIR` монтируется в `/certs:ro`; Caddy читает файлы как root.
 - Caddy сам проксирует WebSocket и передаёт `Host: mediahlg.ru:8443`, поэтому
   проверка same-origin в приложении проходит.
-- После продления сертификата существующим certbot нужно перечитать его:
+- Первичный выпуск сертификата:
+
+  ```bash
+  cd ~/whiteboard
+  ./scripts/certbot.sh init
+  ```
+
+  Скрипт использует webroot существующего nginx на порту 80 (`CERTBOT_WEBROOT`),
+  а сертификат складывает в `TLS_CERTS_DIR`. Состояние чужого certbot не меняется.
+- Автоматическое продление и перечитывание сертификата:
 
   ```cron
-  15 4 * * * cd /home/vashaferov/whiteboard && ./scripts/reload-edge.sh >> /var/log/whiteboard-edge.log 2>&1
+  30 3 * * * cd /home/vashaferov/whiteboard && ./scripts/certbot.sh renew >> /home/vashaferov/whiteboard-certs-log/renew.log 2>&1
+  15 4 * * * cd /home/vashaferov/whiteboard && ./scripts/reload-edge.sh >> /home/vashaferov/whiteboard-certs-log/reload-edge.log 2>&1
   ```
+
+  `certbot renew` продлевает сертификат только когда до истечения остаётся
+  меньше 30 дней, затем скрипт сам делает `caddy reload`. Ежедневный reload —
+  страховка на случай ручного продления.
 
 Если позже понадобится отдавать доску на 443 через существующий nginx,
 достаточно нового vhost с `proxy_pass http://127.0.0.1:8010` (Host с портом
@@ -227,5 +247,6 @@ Cron:
   дальше меняйте его в админке.
 - Если пакет GHCR приватный, сервер логинится по `GHCR_TOKEN`; `GITHUB_TOKEN`
   работает только внутри Actions.
-- Продление сертификата выполняет существующий nginx-certbot; наш `edge`
-  перечитывает файлы по cron (`scripts/reload-edge.sh`).
+- Сертификат продлевает собственный `scripts/certbot.sh renew` (cron);
+  `edge` перечитывает его сразу после продления и дополнительно ежедневно
+  через `scripts/reload-edge.sh`.
