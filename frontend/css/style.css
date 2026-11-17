@@ -219,6 +219,12 @@ textarea {
   background: #f8fafc;
 }
 
+.btn.is-active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
 .btn--danger {
   background: #fee2e2;
   color: #991b1b;

@@ -6,6 +6,8 @@
 const FONT_FAMILY = 'Inter, "Segoe UI", Roboto, Arial, sans-serif';
 const MIN_SCALE = 0.1;
 const FLOW_SHAPES = new Set(['process', 'decision', 'terminator']);
+const LOCK_BADGE = '🔒';
+const LOCK_BADGE_SIZE = 14;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -210,6 +212,7 @@ export class Board {
     }
     this._applyDraggable(entry);
     this._bindTransform(entry);
+    this._applyLockBadge(entry);
     return node;
   }
 
@@ -731,6 +734,44 @@ export class Board {
     if (entry.data.type !== 'frame' && entry.data.type !== 'connector') {
       entry.data.frameId = this._frameFor(entry.data);
     }
+    this._applyLockBadge(entry);
+    this.contentLayer.batchDraw();
+  }
+
+  _applyLockBadge(entry) {
+    if (!(entry.node instanceof Konva.Group)) return;
+    let badge = entry.node.findOne('.lock-badge');
+    if (!entry.data.locked) {
+      badge?.destroy();
+      entry.node.getLayer()?.batchDraw();
+      return;
+    }
+    if (!badge) {
+      badge = new Konva.Text({
+        name: 'lock-badge',
+        text: LOCK_BADGE,
+        fontSize: LOCK_BADGE_SIZE,
+        listening: false,
+      });
+      entry.node.add(badge);
+    }
+    const box = entry.node.getClientRect({ relativeTo: entry.node, skipShadow: true });
+    badge.position({ x: box.x + box.width - LOCK_BADGE_SIZE, y: box.y + 2 });
+    entry.node.getLayer()?.batchDraw();
+  }
+
+  setObjectLocked(objectId, locked) {
+    const entry = this.objects.get(objectId);
+    if (!entry) return;
+    entry.data.locked = Boolean(locked);
+    this._applyLockBadge(entry);
+    this._applyDraggable(entry);
+    if (entry.data.type === 'frame') {
+      for (const child of this.objects.values()) {
+        if (child.data.frameId === objectId) this._applyDraggable(child);
+      }
+    }
+    if (entry.data.id === this.selectedId) this.selectObject(objectId);
     this.contentLayer.batchDraw();
   }
 
@@ -880,8 +921,11 @@ export class Board {
       const data = entry.data;
       const isBlock = data.type === 'shape' && FLOW_SHAPES.has(data.shapeType);
       const transformable = data.type !== 'stroke' && data.type !== 'connector';
-      this.transformer.resizeEnabled(transformable);
-      this.transformer.rotateEnabled(transformable && !isBlock && data.type !== 'frame');
+      const editable = this.editPredicate(data, entry.node);
+      this.transformer.resizeEnabled(transformable && editable);
+      this.transformer.rotateEnabled(
+        transformable && editable && !isBlock && data.type !== 'frame',
+      );
       this.transformer.nodes([entry.node]);
       this.transformer.moveToTop();
       this.transformer.forceUpdate();

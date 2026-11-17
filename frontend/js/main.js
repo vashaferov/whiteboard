@@ -174,6 +174,7 @@ function cacheElements() {
   els.widthValue = $('#width-value');
   els.clearBtn = $('#clear-btn');
   els.imageBtn = $('#image-btn');
+  els.lockBtn = $('#lock-btn');
   els.leaveBtn = $('#leave-btn');
   els.fileInput = $('#file-input');
   els.textEditor = $('#text-editor');
@@ -234,19 +235,15 @@ function startRoom({ room, user, permissions, board }) {
     height: size.height,
     canEditObject: (object) =>
       Boolean(state.user) &&
-      (isStaff(state.user.role) || object.author === state.user.id),
+      (isStaff(state.user.role) || (!lockedFor(object) && object.author === state.user.id)),
     canDeleteObject: (object) => {
       if (!state.user) return false;
       if (isStaff(state.user.role)) return true;
-      if (object.author !== state.user.id) return false;
+      if (lockedFor(object) || object.author !== state.user.id) return false;
       if (object.type === 'frame' && state.board) {
         for (const entry of state.board.objects.values()) {
-          if (
-            entry.data.frameId === object.id &&
-            entry.data.author !== state.user.id
-          ) {
-            return false;
-          }
+          if (entry.data.frameId !== object.id) continue;
+          if (lockedFor(entry.data) || entry.data.author !== state.user.id) return false;
         }
       }
       return true;
@@ -269,7 +266,10 @@ function startRoom({ room, user, permissions, board }) {
     onEditText: (object) => openTextEditorForObject(object),
     onFrameMove: (id, x, y) =>
       sendWorkspace({ type: 'frame_move', objectId: id, x: round(x), y: round(y) }),
-    onSelectObject: () => updateFramePanel(),
+    onSelectObject: () => {
+      updateFramePanel();
+      updateLockButton();
+    },
   });
 
   state.tools = new ToolManager({
@@ -386,6 +386,12 @@ function bindToolbar() {
   els.imageBtn.addEventListener('click', () => els.fileInput.click());
   els.fileInput.addEventListener('change', uploadImage);
   els.leaveBtn.addEventListener('click', () => leaveRoom('Вы вышли из комнаты'));
+  els.lockBtn.addEventListener('click', () => {
+    const id = state.board?.getSelectedId();
+    const object = id ? state.board.getObjectData(id) : null;
+    if (!object || !isStaff(state.user?.role)) return;
+    sendWorkspace({ type: 'object_lock', objectId: id, locked: !object.locked });
+  });
 
   els.pullSelected.addEventListener('click', () => {
     if (!state.selectedStudentIds.size) return;
@@ -401,8 +407,25 @@ function bindToolbar() {
 function canEditObject(object) {
   return (
     Boolean(state.user) &&
-    (isStaff(state.user.role) || object.author === state.user.id)
+    (isStaff(state.user.role) || (!lockedFor(object) && object.author === state.user.id))
   );
+}
+
+function lockedFor(object) {
+  if (!object || !state.user || isStaff(state.user.role)) return false;
+  if (object.locked) return true;
+  if (!object.frameId) return false;
+  return Boolean(state.board?.getObjectData(object.frameId)?.locked);
+}
+
+function updateLockButton() {
+  const id = state.board?.getSelectedId();
+  const object = id ? state.board.getObjectData(id) : null;
+  const staff = isStaff(state.user?.role);
+  els.lockBtn.hidden = !staff || !object;
+  if (!object) return;
+  els.lockBtn.classList.toggle('is-active', Boolean(object.locked));
+  els.lockBtn.title = object.locked ? 'Снять блокировку' : 'Заблокировать';
 }
 
 function selectedFrame() {
@@ -802,6 +825,7 @@ function handleServerEvent(message) {
     case 'object_transform':
     case 'text_update':
     case 'object_delete':
+    case 'object_lock':
     case 'clear':
     case 'cursor':
       applyWorkspaceEvent(message);
@@ -900,6 +924,11 @@ function applyObjectEvent(message) {
       break;
     case 'object_delete':
       board.removeObject(message.objectId);
+      break;
+    case 'object_lock':
+      board.setObjectLocked(message.objectId, message.locked);
+      updateFramePanel();
+      updateLockButton();
       break;
     case 'clear':
       board.clearObjects();

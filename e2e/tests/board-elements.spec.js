@@ -122,7 +122,7 @@ async function uploadImage(page) {
     .toBe(1);
 }
 
-test('eraser: removes strokes, shapes, text and images', async ({ browser, request }) => {
+test('eraser: removes only brush strokes', async ({ browser, request }) => {
   const setup = await lessonSetup(request, { name: 'Eraser' });
   const context = await browser.newContext();
   const teacher = await context.newPage();
@@ -143,33 +143,33 @@ test('eraser: removes strokes, shapes, text and images', async ({ browser, reque
   await eraseAt(teacher, { x: 220, y: 700 });
   await expect.poll(() => objectCount(teacher)).toBe(0);
 
-  // Rectangle.
+  // Rectangle: the eraser leaves it intact.
   await drawRect(teacher, { x: 220, y: 220 }, { x: 340, y: 320 });
   await expect.poll(() => objectCount(teacher)).toBe(1);
   await teacher.click('[data-tool="eraser"]');
   await eraseAt(teacher, { x: 280, y: 270 });
-  await expect.poll(() => objectCount(teacher)).toBe(0);
+  await expect.poll(() => objectCount(teacher)).toBe(1);
 
-  // Text.
+  // Text: the eraser leaves it intact.
   await teacher.click('[data-tool="text"]');
   await clickWorld(teacher, { x: 800, y: 600 });
   await teacher.fill('#text-editor', 'Стереть меня');
   await teacher.press('#text-editor', 'Enter');
-  await expect.poll(() => objectCount(teacher)).toBe(1);
+  await expect.poll(() => objectCount(teacher)).toBe(2);
   await teacher.click('[data-tool="eraser"]');
   await eraseAt(teacher, { x: 830, y: 608 });
-  await expect.poll(() => objectCount(teacher)).toBe(0);
+  await expect.poll(() => objectCount(teacher)).toBe(2);
 
-  // Image.
+  // Image: the eraser leaves it intact.
   await uploadImage(teacher);
   await teacher.click('[data-tool="eraser"]');
   await eraseAt(teacher, { x: 800, y: 450 });
-  await expect.poll(() => objectCount(teacher)).toBe(0);
+  await expect.poll(() => objectCount(teacher)).toBe(3);
 
   await context.close();
 });
 
-test('eraser: a student cannot erase foreign objects', async ({ browser, request }) => {
+test('eraser: a student cannot erase foreign strokes', async ({ browser, request }) => {
   const setup = await lessonSetup(request, { name: 'Eraser rights' });
   const { teacherContext, studentContext, teacher, student } = await openLesson(
     request,
@@ -177,13 +177,13 @@ test('eraser: a student cannot erase foreign objects', async ({ browser, request
     setup,
   );
 
-  await drawRect(teacher, { x: 220, y: 220 }, { x: 340, y: 320 });
-  await drawRect(student, { x: 700, y: 500 }, { x: 820, y: 600 });
+  await drawWithTool(teacher, 'brush', { x: 220, y: 300 }, { x: 340, y: 300 });
+  await drawWithTool(student, 'brush', { x: 700, y: 550 }, { x: 820, y: 550 });
   await waitForObjectCount(teacher, 2);
   await waitForObjectCount(student, 2);
 
   await student.click('[data-tool="eraser"]');
-  await eraseAt(student, { x: 280, y: 270 });
+  await eraseAt(student, { x: 280, y: 300 });
   await expect.poll(() => objectCount(student)).toBe(2);
 
   await eraseAt(student, { x: 760, y: 550 });
@@ -191,7 +191,7 @@ test('eraser: a student cannot erase foreign objects', async ({ browser, request
   await expect.poll(() => objectCount(teacher)).toBe(1);
 
   await teacher.click('[data-tool="eraser"]');
-  await eraseAt(teacher, { x: 280, y: 270 });
+  await eraseAt(teacher, { x: 280, y: 300 });
   await expect.poll(() => objectCount(teacher)).toBe(0);
 
   await teacherContext.close();
@@ -456,7 +456,7 @@ test('frames: dragging a child out detaches it and resize keeps children', async
   await context.close();
 });
 
-test('frames: only the owner or staff can erase a frame with foreign content', async ({
+test('frames: the eraser leaves a frame with foreign content intact', async ({
   browser,
   request,
 }) => {
@@ -478,6 +478,12 @@ test('frames: only the owner or staff can erase a frame with foreign content', a
 
   await teacher.click('[data-tool="eraser"]');
   await eraseAt(teacher, { x: 150, y: 300 });
+  await expect.poll(() => objectCount(teacher)).toBe(2);
+
+  await teacher.click('[data-tool="select"]');
+  await clickWorld(teacher, { x: 150, y: 300 });
+  teacher.once('dialog', (dialog) => dialog.accept());
+  await teacher.keyboard.press('Delete');
   await expect.poll(() => objectCount(teacher)).toBe(0);
   await expect.poll(() => objectCount(student)).toBe(0);
 
@@ -485,7 +491,10 @@ test('frames: only the owner or staff can erase a frame with foreign content', a
   await studentContext.close();
 });
 
-test('eraser: removes a block together with its arrows', async ({ browser, request }) => {
+test('eraser: leaves a block and its arrows; delete removes them', async ({
+  browser,
+  request,
+}) => {
   const setup = await lessonSetup(request, { name: 'Eraser block', student: false });
   const context = await browser.newContext();
   const teacher = await context.newPage();
@@ -499,6 +508,11 @@ test('eraser: removes a block together with its arrows', async ({ browser, reque
 
   await teacher.click('[data-tool="eraser"]');
   await eraseAt(teacher, { x: 280, y: 250 });
+  await expect.poll(() => objectCount(teacher)).toBe(3);
+
+  await teacher.click('[data-tool="select"]');
+  await clickWorld(teacher, { x: 200, y: 250 });
+  await teacher.keyboard.press('Delete');
   await expect.poll(() => objectCount(teacher)).toBe(1);
 
   await context.close();

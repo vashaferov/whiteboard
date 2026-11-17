@@ -2,9 +2,11 @@ import { expect, test } from '@playwright/test';
 
 import {
   clickWorld,
+  dragBy,
   drawRect,
   lessonSetup,
   objectCount,
+  openLesson,
   openRoom,
   signInWith,
   worldToScreen,
@@ -50,3 +52,104 @@ test('eraser: removes brush strokes and leaves other objects', async ({ browser,
 
   await context.close();
 });
+
+async function lockBadgeCount(page) {
+  return page.evaluate(
+    () => window.Konva.stages[0].getLayers()[1].find('.lock-badge').length,
+  );
+}
+
+async function objectPosition(page, index = 0) {
+  return page.evaluate((position) => {
+    const group = window.Konva.stages[0]
+      .getLayers()[1]
+      .getChildren((node) => Boolean(node.id()))[position];
+    return group ? { x: Math.round(group.x()), y: Math.round(group.y()) } : null;
+  }, index);
+}
+
+async function shapePosition(page) {
+  return page.evaluate(() => {
+    const group = window.Konva.stages[0]
+      .getLayers()[1]
+      .getChildren((node) => Boolean(node.id()) && node.findOne('Rect'))
+      .find((node) => !node.findOne('.frame-bg'));
+    return group ? { x: Math.round(group.x()), y: Math.round(group.y()) } : null;
+  });
+}
+
+test('lock: a student cannot move a locked block, teacher can unlock', async ({
+  browser,
+  request,
+}) => {
+  const setup = await lessonSetup(request, { name: 'Lock block', student: true });
+  const { teacherContext, studentContext, teacher, student } = await openLesson(
+    request,
+    browser,
+    setup,
+  );
+  try {
+    await drawWithTool(student, 'process', { x: 200, y: 200 }, { x: 320, y: 280 });
+    await expect.poll(() => objectCount(teacher)).toBe(1);
+
+    await teacher.click('[data-tool="select"]');
+    await clickWorld(teacher, { x: 260, y: 240 });
+    await teacher.click('#lock-btn');
+    await expect.poll(() => lockBadgeCount(student)).toBe(1);
+
+    const before = await objectPosition(teacher);
+    await student.click('[data-tool="select"]');
+    const start = await worldToScreen(student, { x: 260, y: 240 });
+    await dragBy(student, start, 120, 80);
+    await expect.poll(async () => (await objectPosition(teacher)).x).toBe(before.x);
+
+    await teacher.click('#lock-btn');
+    await expect.poll(() => lockBadgeCount(student)).toBe(0);
+    const afterUnlock = await worldToScreen(student, { x: 260, y: 240 });
+    await dragBy(student, afterUnlock, 120, 80);
+    await expect
+      .poll(async () => (await objectPosition(teacher)).x)
+      .toBeGreaterThan(before.x + 60);
+  } finally {
+    await teacherContext.close();
+    await studentContext.close();
+  }
+});
+
+test('lock: a locked frame holds its children', async ({ browser, request }) => {
+  const setup = await lessonSetup(request, { name: 'Lock frame', student: true });
+  const { teacherContext, studentContext, teacher, student } = await openLesson(
+    request,
+    browser,
+    setup,
+  );
+  try {
+    await drawWithTool(teacher, 'frame', { x: 100, y: 100 }, { x: 600, y: 500 });
+    await drawWithTool(student, 'rect', { x: 200, y: 200 }, { x: 300, y: 280 });
+    await expect.poll(() => objectCount(teacher)).toBe(2);
+
+    await teacher.click('[data-tool="select"]');
+    await clickWorld(teacher, { x: 560, y: 470 });
+    await teacher.click('#lock-btn');
+    await expect.poll(() => lockBadgeCount(student)).toBe(1);
+
+    const before = await shapePosition(student);
+    expect(before).not.toBeNull();
+    await student.click('[data-tool="select"]');
+    const start = await worldToScreen(student, { x: 250, y: 240 });
+    await dragBy(student, start, 120, 80);
+    await expect.poll(async () => (await shapePosition(student)).x).toBe(before.x);
+
+    await teacher.click('#lock-btn');
+    await expect.poll(() => lockBadgeCount(student)).toBe(0);
+    const afterUnlock = await worldToScreen(student, { x: 250, y: 240 });
+    await dragBy(student, afterUnlock, 120, 80);
+    await expect
+      .poll(async () => (await shapePosition(student)).x)
+      .toBeGreaterThan(before.x + 60);
+  } finally {
+    await teacherContext.close();
+    await studentContext.close();
+  }
+});
+
