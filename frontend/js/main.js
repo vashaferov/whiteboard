@@ -533,6 +533,67 @@ function updateToolbar() {
 
 // -------------------------------------------------------------------- image
 
+async function uploadImageFile(file) {
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch('/api/upload', {
+    method: 'POST',
+    body: form,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = data.detail;
+    throw new Error(
+      typeof detail === 'string'
+        ? detail
+        : detail?.message || 'Не удалось загрузить изображение',
+    );
+  }
+
+  const image = new Image();
+  await new Promise((resolve, reject) => {
+    image.onload = resolve;
+    image.onerror = () => reject(new Error('Не удалось открыть изображение'));
+    image.src = data.url;
+  });
+
+  const maxWidth = Math.min(480, state.board.width * 0.6);
+  const scale = Math.min(1, maxWidth / image.naturalWidth);
+  return {
+    url: data.url,
+    width: Math.max(40, image.naturalWidth * scale),
+    height: Math.max(40, image.naturalHeight * scale),
+  };
+}
+
+function placeUploadedImage(data, { offset = 0 } = {}) {
+  const x = Math.max(0, (state.board.width - data.width) / 2 + offset);
+  const y = Math.max(0, (state.board.height - data.height) / 2 + offset);
+  const objectId = newId();
+
+  state.board.addObject({
+    id: objectId,
+    type: 'image',
+    url: data.url,
+    x,
+    y,
+    width: data.width,
+    height: data.height,
+    author: state.user?.id ?? null,
+  });
+  state.board.selectObject(objectId);
+  sendWorkspace({
+    type: 'image_add',
+    objectId,
+    url: data.url,
+    x: round(x),
+    y: round(y),
+    width: round(data.width),
+    height: round(data.height),
+  });
+  return objectId;
+}
+
 async function uploadImage(event) {
   const file = event.target.files?.[0];
   event.target.value = '';
@@ -540,62 +601,42 @@ async function uploadImage(event) {
 
   els.imageBtn.disabled = true;
   try {
-    const form = new FormData();
-    form.append('file', file);
-    const response = await fetch('/api/upload', {
-      method: 'POST',
-      body: form,
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const detail = data.detail;
-      toast(typeof detail === 'string' ? detail : detail?.message || 'Не удалось загрузить изображение');
-      return;
-    }
-
-    const image = new Image();
-    await new Promise((resolve, reject) => {
-      image.onload = resolve;
-      image.onerror = reject;
-      image.src = data.url;
-    });
-
-    const boardWidth = state.board.width;
-    const boardHeight = state.board.height;
-    const maxWidth = Math.min(480, boardWidth * 0.6);
-    const scale = Math.min(1, maxWidth / image.naturalWidth);
-    const width = Math.max(40, image.naturalWidth * scale);
-    const height = Math.max(40, image.naturalHeight * scale);
-    const x = Math.max(0, (boardWidth - width) / 2);
-    const y = Math.max(0, (boardHeight - height) / 2);
-    const objectId = newId();
-
-    state.board.addObject({
-      id: objectId,
-      type: 'image',
-      url: data.url,
-      x,
-      y,
-      width,
-      height,
-      author: state.user?.id ?? null,
-    });
-    state.board.selectObject(objectId);
+    placeUploadedImage(await uploadImageFile(file));
     selectTool('select');
-    sendWorkspace({
-      type: 'image_add',
-      objectId,
-      url: data.url,
-      x: round(x),
-      y: round(y),
-      width: round(width),
-      height: round(height),
-    });
-  } catch {
-    toast('Не удалось открыть изображение');
+  } catch (error) {
+    toast(error.message || 'Не удалось вставить изображение');
   } finally {
     els.imageBtn.disabled = false;
   }
+}
+
+async function handlePaste(event) {
+  if (!state.board || !state.ready || !els.textEditor.hidden) return;
+  const target = event.target;
+  if (
+    target &&
+    (target.isContentEditable ||
+      ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+  ) {
+    return;
+  }
+
+  const files = [...(event.clipboardData?.items ?? [])]
+    .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+  if (!files.length) return;
+
+  event.preventDefault();
+  let lastId = null;
+  for (const [index, file] of files.entries()) {
+    try {
+      lastId = placeUploadedImage(await uploadImageFile(file), { offset: index * 24 });
+    } catch (error) {
+      toast(error.message || 'Не удалось вставить изображение');
+    }
+  }
+  if (lastId) selectTool('select');
 }
 
 // --------------------------------------------------------------------- text
@@ -1354,6 +1395,7 @@ function bindUsersResizer() {
 
 function bindWindowEvents() {
   window.addEventListener('beforeunload', () => state.sync?.close());
+  document.addEventListener('paste', (event) => void handlePaste(event));
 }
 
 // -------------------------------------------------------------------- toast
