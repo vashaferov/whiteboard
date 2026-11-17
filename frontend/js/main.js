@@ -4,6 +4,7 @@ import { Board } from './board.js';
 import { ToolManager } from './tools.js';
 import { SyncClient } from './sync.js';
 import { PagesPanel } from './pages.js';
+import { exportWorkspacePdf } from './export.js';
 import { authApi, roomsApi } from './api.js';
 import { initAuth, showAuth } from './auth.js';
 import { initDashboard, showDashboard } from './dashboard.js';
@@ -181,6 +182,7 @@ function cacheElements() {
   els.widthValue = $('#width-value');
   els.clearBtn = $('#clear-btn');
   els.imageBtn = $('#image-btn');
+  els.pdfBtn = $('#pdf-btn');
   els.undoBtn = $('#undo-btn');
   els.lockBtn = $('#lock-btn');
   els.leaveBtn = $('#leave-btn');
@@ -393,6 +395,7 @@ function bindToolbar() {
 
   els.imageBtn.addEventListener('click', () => els.fileInput.click());
   els.fileInput.addEventListener('change', uploadImage);
+  els.pdfBtn.addEventListener('click', exportPdf);
   els.undoBtn.addEventListener('click', requestUndo);
   els.leaveBtn.addEventListener('click', () => leaveRoom('Вы вышли из комнаты'));
   els.lockBtn.addEventListener('click', () => {
@@ -528,6 +531,7 @@ function selectTool(tool) {
 
 function updateToolbar() {
   els.clearBtn.hidden = !state.permissions.canClear;
+  els.pdfBtn.hidden = !isStaff(state.user?.role);
   els.imageBtn.disabled = false;
 }
 
@@ -637,6 +641,25 @@ async function handlePaste(event) {
     }
   }
   if (lastId) selectTool('select');
+}
+
+async function exportPdf() {
+  if (!state.board || !isStaff(state.user?.role)) return;
+  if (state.tools?.isDrawing()) return;
+  if (state.board.objects.size === 0) {
+    toast('На странице нет объектов');
+    return;
+  }
+
+  els.pdfBtn.disabled = true;
+  try {
+    const workspace = state.workspaces.find((item) => item.id === state.workspaceId);
+    await exportWorkspacePdf(state.board, workspace?.name || 'board');
+  } catch {
+    toast('Не удалось экспортировать PDF');
+  } finally {
+    els.pdfBtn.disabled = false;
+  }
 }
 
 // --------------------------------------------------------------------- text

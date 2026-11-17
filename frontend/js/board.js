@@ -164,6 +164,59 @@ export class Board {
     this.fit();
   }
 
+  async exportCanvas() {
+    const images = [];
+    for (const entry of this.objects.values()) {
+      const image = entry.node.findOne?.('Image')?.image?.();
+      if (image?.decode) images.push(image.decode().catch(() => {}));
+    }
+    await Promise.all(images);
+
+    const stage = this.stage;
+    const saved = {
+      width: stage.width(),
+      height: stage.height(),
+      scaleX: stage.scaleX(),
+      scaleY: stage.scaleY(),
+      x: stage.x(),
+      y: stage.y(),
+      overlay: this.overlayLayer.visible(),
+      transformer: this.transformer.visible(),
+      grid: this.grid.visible(),
+      shadow: this.paper.shadowEnabled(),
+    };
+    const badges = [];
+    for (const entry of this.objects.values()) {
+      const badge = entry.node.findOne?.('.lock-badge');
+      if (badge) {
+        badges.push([badge, badge.visible()]);
+        badge.visible(false);
+      }
+    }
+
+    try {
+      this.overlayLayer.visible(false);
+      this.transformer.visible(false);
+      this.grid.visible(false);
+      this.paper.shadowEnabled(false);
+      stage.size({ width: this.width, height: this.height });
+      stage.scale({ x: 1, y: 1 });
+      stage.position({ x: 0, y: 0 });
+      stage.draw();
+      return stage.toCanvas({ pixelRatio: 2 });
+    } finally {
+      for (const [badge, visible] of badges) badge.visible(visible);
+      this.overlayLayer.visible(saved.overlay);
+      this.transformer.visible(saved.transformer);
+      this.grid.visible(saved.grid);
+      this.paper.shadowEnabled(saved.shadow);
+      stage.size({ width: saved.width, height: saved.height });
+      stage.scale({ x: saved.scaleX, y: saved.scaleY });
+      stage.position({ x: saved.x, y: saved.y });
+      this.fit();
+    }
+  }
+
   getPointer() {
     const pointer = this.stage.getRelativePointerPosition();
     if (!pointer) return null;
