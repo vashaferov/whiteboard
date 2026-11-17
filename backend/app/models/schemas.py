@@ -326,9 +326,19 @@ class WorkspaceSwitch(_Message):
     workspaceId: str = Field(pattern=WORKSPACE_ID_PATTERN)
 
 
+class PresentationSlide(_Message):
+    type: Literal["presentation_slide"]
+    workspaceId: str | None = Field(default=None, pattern=WORKSPACE_ID_PATTERN)
+    slideIndex: int = Field(ge=0, le=1000)
+
+
 class WorkspaceCreate(_Message):
     type: Literal["workspace_create"]
     name: str | None = Field(default=None, min_length=1, max_length=60)
+    kind: Literal["page", "presentation"] = "page"
+    slides: list[Annotated[str, Field(pattern=UPLOAD_URL_PATTERN)]] = Field(
+        default_factory=list, max_length=80
+    )
 
     @field_validator("name")
     @classmethod
@@ -339,6 +349,14 @@ class WorkspaceCreate(_Message):
         if not cleaned:
             raise ValueError("Название страницы не может быть пустым")
         return cleaned
+
+    @model_validator(mode="after")
+    def _check_slides(self) -> WorkspaceCreate:
+        if self.kind == "presentation" and not self.slides:
+            raise ValueError("В презентации нет слайдов")
+        if self.kind == "page" and self.slides:
+            raise ValueError("У обычной страницы не может быть слайдов")
+        return self
 
 
 class WorkspaceRename(_Message):
@@ -412,6 +430,7 @@ ClientMessage = Annotated[
     | ObjectDelete
     | ObjectLock
     | Undo
+    | PresentationSlide
     | Cursor
     | Clear
     | Kick

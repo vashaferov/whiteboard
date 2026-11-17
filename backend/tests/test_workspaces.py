@@ -131,6 +131,30 @@ def test_workspace_messages_parse() -> None:
     )
 
 
+def test_presentation_messages_parse() -> None:
+    created = WorkspaceCreate.model_validate(
+        {
+            "type": "workspace_create",
+            "name": "Урок",
+            "kind": "presentation",
+            "slides": ["/uploads/a.jpg"],
+        }
+    )
+    assert created.kind == "presentation"
+    assert created.slides == ["/uploads/a.jpg"]
+    assert WorkspaceCreate.model_validate({"type": "workspace_create"}).kind == "page"
+    slide = client_message_adapter.validate_python(
+        {"type": "presentation_slide", "workspaceId": "ws_default", "slideIndex": 2}
+    )
+    assert slide.type == "presentation_slide"
+    with pytest.raises(ValidationError):
+        WorkspaceCreate.model_validate(
+            {"type": "workspace_create", "kind": "presentation", "slides": ["not a url"]}
+        )
+    with pytest.raises(ValidationError):
+        WorkspaceCreate.model_validate({"type": "workspace_create", "kind": "presentation"})
+
+
 def test_delete_and_move_ack_parse() -> None:
     assert (
         WorkspaceDelete.model_validate(

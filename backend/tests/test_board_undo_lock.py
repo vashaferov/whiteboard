@@ -26,7 +26,7 @@ def test_student_cannot_change_locked_object(client: TestClient, login_user) -> 
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         tw.send_json({**shape("block"), "shapeType": "process"})
         recv_until(sw, "shape_add")
         tw.send_json({"type": "object_lock", "objectId": "block", "locked": True})
@@ -62,7 +62,7 @@ def test_only_staff_can_lock(client: TestClient, login_user) -> None:
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         tw.send_json(shape("own"))
         recv_until(sw, "shape_add")
         sw.send_json({"type": "object_lock", "objectId": "own", "locked": True})
@@ -75,7 +75,7 @@ def test_locked_frame_blocks_children(client: TestClient, login_user) -> None:
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         sw.send_json(frame("frame-1"))
         assert "invalid_message" not in codes(flush(sw))
         recv_until(tw, "frame_add")
@@ -98,7 +98,7 @@ def test_student_object_is_not_captured_by_locked_frame(client: TestClient, logi
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         tw.send_json(frame("frame-1"))
         recv_until(sw, "frame_add")
         tw.send_json({"type": "object_lock", "objectId": "frame-1", "locked": True})
@@ -114,7 +114,7 @@ def test_locked_child_blocks_frame_move(client: TestClient, login_user) -> None:
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         sw.send_json(frame("frame-1"))
         assert "invalid_message" not in codes(flush(sw))
         recv_until(tw, "frame_add")
@@ -134,7 +134,7 @@ def test_undo_removes_created_shape(client: TestClient, login_user) -> None:
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         sw.send_json(shape("s1"))
         recv_until(tw, "shape_add")
 
@@ -155,7 +155,7 @@ def test_undo_restores_deleted_shape_with_author(client: TestClient, login_user)
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         sw.send_json(shape("s1"))
         recv_until(tw, "shape_add")
         tw.send_json({"type": "object_delete", "objectId": "s1"})
@@ -177,7 +177,7 @@ def test_undo_move_keeps_other_fields(client: TestClient, login_user) -> None:
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         sw.send_json(frame("frame-1"))
         recv_until(tw, "frame_add")
         sw.send_json({"type": "frame_move", "objectId": "frame-1", "x": 50, "y": 40})
@@ -202,7 +202,7 @@ def test_undo_frame_creation_releases_children(client: TestClient, login_user) -
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         tw.send_json(shape("inner"))
         recv_until(sw, "shape_add")
         tw.send_json(frame("frame-1"))
@@ -224,7 +224,7 @@ def test_undo_frame_deletion_restores_children(client: TestClient, login_user) -
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         tw.send_json(frame("frame-1"))
         recv_until(sw, "frame_add")
         tw.send_json(shape("inner"))
@@ -248,7 +248,7 @@ def test_undo_block_deletion_restores_arrows(client: TestClient, login_user) -> 
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         tw.send_json({**shape("flow-a"), "shapeType": "process"})
         recv_until(sw, "shape_add")
         tw.send_json({**shape("flow-b"), "shapeType": "process"})
@@ -271,7 +271,7 @@ def test_undo_skips_stale_entry(client: TestClient, login_user) -> None:
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         sw.send_json(shape("a1"))
         recv_until(tw, "shape_add")
         sw.send_json(shape("a2"))
@@ -291,7 +291,7 @@ def test_undo_empty_and_cleared_by_switch(client: TestClient, login_user) -> Non
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         sw.send_json({"type": "undo"})
         assert codes(flush(sw)) == ["undo_empty"]
 
@@ -308,7 +308,7 @@ def test_undo_cleared_by_clear(client: TestClient, login_user) -> None:
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         tw.send_json(shape("a1"))
         recv_until(sw, "shape_add")
         tw.send_json({"type": "clear"})
@@ -324,7 +324,7 @@ def test_undo_skips_locked_object_for_student(client: TestClient, login_user) ->
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         sw.send_json(shape("s1"))
         recv_until(tw, "shape_add")
         sw.send_json({"type": "object_update", "objectId": "s1", "x": 90, "y": 90})
@@ -342,7 +342,7 @@ def test_undo_frame_move_skips_when_child_locked(client: TestClient, login_user)
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
         tw.receive_json()
         sw.receive_json()
-        tw.receive_json()
+        barrier(tw)
         sw.send_json(frame("frame-1"))
         recv_until(tw, "frame_add")
         sw.send_json(shape("inner"))
