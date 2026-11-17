@@ -483,3 +483,22 @@ test('frames: only the owner or staff can erase a frame with foreign content', a
   await teacherContext.close();
   await studentContext.close();
 });
+
+test('eraser: removes a block together with its arrows', async ({ browser, request }) => {
+  const setup = await lessonSetup(request, { name: 'Eraser block', student: false });
+  const context = await browser.newContext();
+  const teacher = await context.newPage();
+  await signInWith(request, teacher, setup.teacherLogin);
+  await openRoom(teacher, setup.room.id);
+
+  await drawWithTool(teacher, 'process', { x: 200, y: 200 }, { x: 360, y: 300 });
+  await drawWithTool(teacher, 'decision', { x: 520, y: 200 }, { x: 680, y: 320 });
+  await drawWithTool(teacher, 'arrow', { x: 280, y: 250 }, { x: 600, y: 260 });
+  await expect.poll(() => objectCount(teacher)).toBe(3);
+
+  await teacher.click('[data-tool="eraser"]');
+  await eraseAt(teacher, { x: 280, y: 250 });
+  await expect.poll(() => objectCount(teacher)).toBe(1);
+
+  await context.close();
+});

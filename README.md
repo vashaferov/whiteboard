@@ -15,7 +15,13 @@
 - Cookie-сессии (`wb_session`, HttpOnly), проверка статуса УЗ и роли на каждом REST-запросе
   и WS-подключении; блокировка, отзыв доступа и удаление комнаты выкидывают из неё сразу.
 - Кисть, ластик, прямоугольник, круг, линия, стрелка, текст.
-- Выбор и перемещение объектов (ученик — свои, учитель и администратор — любые).
+- Блок-схемы: процесс, решение, начало/конец с подписями; стрелки прилипают к блокам и
+  перестраиваются при их перемещении и изменении размера.
+- Фреймы: рабочая область с рамкой и фоном (заливка, линии или клетка); брошенные внутрь
+  элементы прикрепляются и двигаются вместе с фреймом.
+- Выбор и перемещение объектов (ученик — свои, учитель и администратор — любые); картинку
+  можно двигать сразу после вставки.
+- Ластик удаляет объекты целиком (учитель — любые, ученик — свои).
 - Масштабирование и поворот фигур, текста и изображений через Transformer.
 - Редактирование текста двойным кликом или клавишей `F2`.
 - Загрузка изображений через `POST /api/upload` (локально или в S3-совместимом хранилище).
@@ -139,7 +145,7 @@ backend/
       images.py             # локальное и S3-хранилище изображений
       metrics.py            # Prometheus-метрики
       logging.py            # JSON-логи, request-id, Sentry
-  tests/                    # unit + integration (168 тестов)
+  tests/                    # unit + integration (182 теста)
 frontend/
   index.html
   js/{main,board,tools,sync}.js
@@ -173,21 +179,30 @@ docker-compose.prod.yml     # prod: Caddy + whiteboard + Redis + SeaweedFS
 доступа или выкинут, `4404` комната не найдена, `4409` сессия заменена.
 
 Клиент → сервер: `stroke_start`, `stroke_point`, `stroke_end`, `shape_add`, `text_add`,
-`image_add`, `object_update`, `object_transform`, `text_update`, `object_delete`,
-`cursor`, `clear`, `kick`, `workspace_switch`, `workspace_create`, `workspace_rename`,
-`workspace_delete`, `workspace_reorder`, `workspace_pull`, `workspace_move_ack`.
+`image_add`, `connector_add`, `frame_add`, `frame_move`, `frame_style`, `object_update`,
+`object_transform`, `text_update`, `object_delete`, `cursor`, `clear`, `kick`,
+`workspace_switch`, `workspace_create`, `workspace_rename`, `workspace_delete`,
+`workspace_reorder`, `workspace_pull`, `workspace_move_ack`.
 
 Сервер → клиент: `init`, `user_joined`, `user_left`, `stroke_*`, `shape_add`, `text_add`,
-`image_add`, `object_update`, `object_transform`, `text_update`, `object_delete`,
-`cursor`, `cursor_remove`, `workspace_state`, `workspace_created`, `workspace_renamed`,
-`workspace_reordered`, `workspace_deleted`, `workspace_prepare_move`, `workspace_moved`,
-`clear`, `error`, `kicked`.
+`image_add`, `connector_add`, `frame_add`, `frame_captured`, `frame_moved`, `frame_style`,
+`object_update`, `object_transform`, `text_update`, `object_delete`, `cursor`, `cursor_remove`,
+`workspace_state`, `workspace_created`, `workspace_renamed`, `workspace_reordered`,
+`workspace_deleted`, `workspace_prepare_move`, `workspace_moved`, `clear`, `error`, `kicked`.
 
 Дополнительно:
 
-- `object_update` — перемещение объекта (автор или staff).
-- `object_transform` — resize/rotate (`x`, `y`, `width`, `height`, `rotation`, `fontSize`).
-- `text_update` — изменение содержимого текста (автор или staff).
+- `object_update` — перемещение объекта (автор или staff); несёт `frameId`, если объект
+  прикреплён к фрейму или открепился.
+- `object_transform` — resize/rotate (`x`, `y`, `width`, `height`, `rotation`, `fontSize`);
+  блоки схемы и фреймы не поворачиваются.
+- `text_update` — изменение содержимого текста или подписи блока схемы (автор или staff).
+- `connector_add` — стрелка между двумя блоками; рассылается всем, включая отправителя;
+  удаление блока каскадно удаляет его стрелки.
+- `frame_add`, `frame_captured`, `frame_moved`, `frame_style` — создание фрейма, захват
+  существующих объектов, перемещение фрейма с детьми и смена фона. Привязка к фрейму
+  считается по якорю (центр фигуры/картинки/блока, левый верхний угол текста); её можно
+  потерять, вытащив объект за пределы фрейма.
 - `kick` — отключение участника; отзыв доступа, блокировка, смена роли и удаление комнаты
   приходят как `kicked` с причиной.
 - `stroke_end` несёт полный объект штриха, чтобы опоздавшие и переподключившиеся
@@ -217,7 +232,8 @@ cd backend
 (`clear`, удаление, перемещение, transform, текст), штрихи, курсоры/лимиты, kick, восстановление
 снимка, Redis Pub/Sub и presence на `fakeredis`, метрики/readiness/JSON-логи, edge cases,
 страницы (создание/переименование/удаление/порядок, изоляция объектов, двухфазный перенос,
-миграция старых снимков).
+миграция старых снимков), блоки схемы и подписи, коннекторы и каскадное удаление, фреймы
+(захват, перемещение детей, стиль, каскад), удаление объектов автором/стаффом.
 
 E2E в репозитории (Playwright, Chromium):
 
@@ -233,7 +249,10 @@ npx playwright test
 основной урок (рисование, курсор, resize/rotate, текст, reload), права и kick, админ в чужой
 комнате, reconnect, страницы (создание, изоляция, переключение, переименование, порядок,
 reload, удаление цели переключения, удаление непустой страницы), перенос учеников (один/все,
-черновик), отзыв доступа и понижение учителя, истёкшая сессия, мобильный viewport.
+черновик), отзыв доступа и понижение учителя, истёкшая сессия, мобильный viewport,
+перемещение только что вставленной картинки, ластик по всем типам объектов и права ученика,
+блок-схема с подписью и стрелками, фреймы (фон, захват, движение, открепление, удаление,
+права).
 
 ## Docker
 
