@@ -160,6 +160,9 @@ curl -fsS https://mediahlg.ru:8443/metrics | head
 | `PUBLIC_HEALTH_URL` | рекомендуется | `https://mediahlg.ru:8443/health/ready` |
 
 Рекомендуется создать Environment `production` и включить required reviewers.
+Пока сервер не готов, деплой выключен: создайте repository variable
+`DEPLOY_ENABLED = true` (Settings → Secrets and variables → Actions → Variables),
+когда секреты добавлены. Сборка образа при этом работает всегда.
 
 Что делает деплой:
 
