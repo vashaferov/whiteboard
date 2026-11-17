@@ -112,7 +112,7 @@ test('lock: a student cannot move a locked block, teacher can unlock', async ({
     await dragBy(student, start, 120, 80);
     await expect.poll(async () => (await objectPosition(teacher)).x).toBe(before.x);
 
-    await teacher.click('#lock-btn');
+    await teacher.click('#undo-btn');
     await expect.poll(() => lockBadgeCount(student)).toBe(0);
     const afterUnlock = await worldToScreen(student, { x: 260, y: 240 });
     await dragBy(student, afterUnlock, 120, 80);
@@ -149,7 +149,7 @@ test('lock: a locked frame holds its children', async ({ browser, request }) => 
     await dragBy(student, start, 120, 80);
     await expect.poll(async () => (await shapePosition(student)).x).toBe(before.x);
 
-    await teacher.click('#lock-btn');
+    await teacher.click('#undo-btn');
     await expect.poll(() => lockBadgeCount(student)).toBe(0);
     const afterUnlock = await worldToScreen(student, { x: 250, y: 240 });
     await dragBy(student, afterUnlock, 120, 80);

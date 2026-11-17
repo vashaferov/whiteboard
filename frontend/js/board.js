@@ -708,13 +708,20 @@ export class Board {
       if (!object || !object.id) continue;
       if (this.objects.has(object.id)) {
         this.applyObjectTransform(object);
-        if (this.selectedId === object.id) this.selectObject(object.id);
       } else {
         this.addObject(object);
       }
       const entry = this.objects.get(object.id);
-      if (entry) this._applyLockBadge(entry);
+      if (!entry) continue;
+      this._applyLockBadge(entry);
+      this._applyDraggable(entry);
+      if (entry.data.type === 'frame') {
+        for (const child of this.objects.values()) {
+          if (child.data.frameId === object.id) this._applyDraggable(child);
+        }
+      }
     }
+    if (this.selectedId) this.selectObject(this.selectedId);
     this.contentLayer.batchDraw();
   }
 
