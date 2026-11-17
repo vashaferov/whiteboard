@@ -11,4 +11,4 @@ COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.vds.yml}
 PROJECT=${COMPOSE_PROJECT_NAME:-whiteboard-prod}
 
 docker compose -p "$PROJECT" -f "$COMPOSE_FILE" exec -T edge \
-  caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+  caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile < /dev/null

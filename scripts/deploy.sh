@@ -88,7 +88,7 @@ wait_healthy edge
 
 # Pick up a renewed certificate without recreating the container.
 compose exec -T edge caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile \
-  >/dev/null 2>&1 || true
+  </dev/null >/dev/null 2>&1 || true
 
 if [ -n "${PUBLIC_HEALTH_URL:-}" ]; then
   log "checking $PUBLIC_HEALTH_URL"

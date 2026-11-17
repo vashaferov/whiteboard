@@ -38,7 +38,7 @@ run_certbot() {
     -v "$CERT_DIR:/etc/letsencrypt" \
     -v "$LOG_DIR:/var/log/letsencrypt" \
     -v "$WEBROOT:/var/www/certbot" \
-    "$IMAGE" "$@"
+    "$IMAGE" "$@" < /dev/null
 }
 
 action=${1:-renew}
@@ -61,5 +61,5 @@ esac
 # Pick up a renewed certificate in the running edge.
 if [ -n "$(docker compose -p "$PROJECT" -f "$COMPOSE_FILE" ps -q edge 2>/dev/null)" ]; then
   docker compose -p "$PROJECT" -f "$COMPOSE_FILE" exec -T edge \
-    caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+    caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile < /dev/null >/dev/null
 fi
