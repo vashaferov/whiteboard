@@ -59,6 +59,7 @@ WORKSPACE_SCOPED_EVENTS = {
     "object_transform",
     "text_update",
     "object_delete",
+    "object_lock",
     "clear",
     "cursor",
     "cursor_remove",
@@ -1065,6 +1066,12 @@ class RoomManager:
                 )
         elif kind == "object_delete":
             await self._redis.hdel(objects_key, str(message.get("objectId", "")))
+        elif kind == "object_lock":
+            obj = room.get_object(str(message.get("objectId", "")))
+            if obj is not None:
+                await self._redis.hset(
+                    objects_key, str(obj["id"]), json.dumps(obj, ensure_ascii=False)
+                )
         elif kind == "frame_captured":
             for object_id in message.get("objectIds", []):
                 obj = room.get_object(str(object_id))
@@ -1140,6 +1147,11 @@ class RoomManager:
                 changed = True
         elif kind == "object_delete":
             changed = room.remove_object(str(message.get("objectId", ""))) is not None
+        elif kind == "object_lock":
+            obj = room.get_object(str(message.get("objectId", "")))
+            if obj is not None:
+                obj["locked"] = bool(message.get("locked"))
+                changed = True
         elif kind == "frame_captured":
             frame_id = message.get("frameId")
             for object_id in message.get("objectIds", []):

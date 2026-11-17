@@ -296,6 +296,12 @@ class ObjectDelete(_Message):
     objectId: str = Field(pattern=OBJECT_ID_PATTERN)
 
 
+class ObjectLock(_Message):
+    type: Literal["object_lock"]
+    objectId: str = Field(pattern=OBJECT_ID_PATTERN)
+    locked: bool
+
+
 class Cursor(_Message):
     type: Literal["cursor"]
     x: float = Field(ge=COORD_MIN, le=COORD_MAX)
@@ -400,6 +406,7 @@ ClientMessage = Annotated[
     | ObjectTransform
     | TextUpdate
     | ObjectDelete
+    | ObjectLock
     | Cursor
     | Clear
     | Kick
