@@ -14,10 +14,16 @@ export const FONT_STACKS = {
 export function fontStack(fontFamily) {
   return FONT_STACKS[fontFamily] ?? FONT_STACKS.sans;
 }
+function isEditableTarget(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
+}
 const MIN_SCALE = 0.1;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 4;
 const PAN_KEEP_RATIO = 0.25;
+const PAN_THRESHOLD = 4;
 const FLOW_SHAPES = new Set(['process', 'decision', 'terminator']);
 const LOCK_BADGE = '🔒';
 const LOCK_BADGE_SIZE = 14;
@@ -148,9 +154,19 @@ export class Board {
     this.onGestureStart = options.onGestureStart ?? (() => {});
     this.pointers = new Map();
     this.gesture = null;
+    this.panDrag = null;
+    this.spaceHeld = false;
 
     this._onWindowResize = () => this.layout();
     window.addEventListener('resize', this._onWindowResize);
+    this._onKeyDown = (event) => {
+      if (event.code === 'Space' && !isEditableTarget(event.target)) this.spaceHeld = true;
+    };
+    this._onKeyUp = (event) => {
+      if (event.code === 'Space') this.spaceHeld = false;
+    };
+    window.addEventListener('keydown', this._onKeyDown);
+    window.addEventListener('keyup', this._onKeyUp);
     this.resizeObserver = new ResizeObserver(() => this.layout());
     this.resizeObserver.observe(container);
 
@@ -202,6 +218,7 @@ export class Board {
     this.stage.size({ width: containerWidth, height: containerHeight });
     this.stage.scale({ x: scale, y: scale });
     this.stage.position({ x: this.offsetX, y: this.offsetY });
+    this.container.classList.toggle('is-pannable', this.zoom > 1 && this.selectMode);
     this.stage.batchDraw();
     this.onViewChange(this.getZoomPercent());
   }
@@ -259,14 +276,18 @@ export class Board {
     this.setZoom(this.zoom * factor, anchor);
   }
 
-  panBy(dx, dy) {
+  _setPan(panX, panY) {
     if (this.zoom <= 1) return;
     const containerWidth = Math.max(1, this.container.clientWidth);
     const containerHeight = Math.max(1, this.container.clientHeight);
-    this.panX += dx;
-    this.panY += dy;
+    this.panX = panX;
+    this.panY = panY;
     this._clampView(containerWidth, containerHeight);
     this._applyView(containerWidth, containerHeight);
+  }
+
+  panBy(dx, dy) {
+    this._setPan(this.panX + dx, this.panY + dy);
   }
 
   _pointerPoint(event) {
@@ -275,7 +296,7 @@ export class Board {
   }
 
   isGesturing() {
-    return Boolean(this.gesture);
+    return Boolean(this.gesture || this.panDrag);
   }
 
   _trackPointerDown(event) {
@@ -299,6 +320,16 @@ export class Board {
   }
 
   _trackPointerMove(event) {
+    if (this.panDrag && this.panDrag.id === event.pointerId) {
+      const drag = this.panDrag;
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(dx, dy) < PAN_THRESHOLD) return;
+      drag.moved = true;
+      this.container.classList.add('is-panning');
+      this._setPan(drag.panX + dx, drag.panY + dy);
+      return;
+    }
     if (!this.pointers.has(event.pointerId)) return;
     this.pointers.set(event.pointerId, this._pointerPoint(event));
     if (this.pointers.size < 2 || !this.gesture) return;
@@ -322,6 +353,11 @@ export class Board {
   }
 
   _trackPointerUp(event) {
+    if (this.panDrag && this.panDrag.id === event.pointerId) {
+      this.container.releasePointerCapture?.(event.pointerId);
+      this.container.classList.remove('is-panning');
+      this.panDrag = null;
+    }
     this.pointers.delete(event.pointerId);
     if (this.pointers.size < 2) this.gesture = null;
   }
@@ -1250,6 +1286,7 @@ export class Board {
   setSelectMode(enabled) {
     this.selectMode = enabled;
     if (!enabled) this.selectObject(null);
+    this.container.classList.toggle('is-pannable', this.zoom > 1 && enabled);
     for (const entry of this.objects.values()) this._applyDraggable(entry);
   }
 
@@ -1468,6 +1505,27 @@ export class Board {
   }
 
   _handleStagePointerDown(event) {
+    const native = event.evt;
+    const empty = event.target === this.stage || event.target === this.paper;
+    if (
+      this.zoom > 1 &&
+      (native.button === 1 ||
+        this.spaceHeld ||
+        (native.button === 0 && this.selectMode && empty))
+    ) {
+      native.preventDefault?.();
+      this.panDrag = {
+        id: native.pointerId,
+        startX: native.clientX,
+        startY: native.clientY,
+        panX: this.panX,
+        panY: this.panY,
+        moved: false,
+      };
+      this.container.setPointerCapture?.(native.pointerId);
+      if (empty) this.selectObject(null);
+      return;
+    }
     if (!this.selectMode) return;
     const target = event.target;
     if (target === this.stage || target === this.paper) {
@@ -1588,6 +1646,8 @@ export class Board {
     this.destroyed = true;
     this.resizeObserver?.disconnect();
     window.removeEventListener('resize', this._onWindowResize);
+    window.removeEventListener('keydown', this._onKeyDown);
+    window.removeEventListener('keyup', this._onKeyUp);
     this.container.removeEventListener('pointerdown', this._onPointerDown);
     this.container.removeEventListener('pointermove', this._onPointerMove);
     this.container.removeEventListener('pointerup', this._onPointerUp);

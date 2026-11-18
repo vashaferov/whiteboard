@@ -36,6 +36,23 @@ test('zoom controls change the view and reset to fit', async ({ page, request })
   await expect(page.locator('#zoom-reset')).toHaveText('400%');
 });
 
+test('dragging the empty canvas pans a zoomed board', async ({ page, request }) => {
+  await openTeacherRoom(page, request);
+  await page.click('#zoom-in');
+  await page.click('#zoom-in');
+  await page.click('[data-tool="select"]');
+  const before = await stageView(page);
+  const box = await page.locator('#board-stage').boundingBox();
+  const start = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x - 160, start.y - 120, { steps: 10 });
+  await page.mouse.up();
+  const after = await stageView(page);
+  expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeGreaterThan(10);
+  expect(after.scaleX).toBeCloseTo(before.scaleX, 3);
+});
+
 test('drawing after zoom uses world coordinates', async ({ page, request }) => {
   await openTeacherRoom(page, request);
   await page.click('#zoom-in');

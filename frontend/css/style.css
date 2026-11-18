@@ -606,6 +606,14 @@ textarea {
   cursor: default;
 }
 
+.board__stage.is-pannable {
+  cursor: grab;
+}
+
+.board__stage.is-panning {
+  cursor: grabbing;
+}
+
 .board canvas {
   touch-action: none;
 }
