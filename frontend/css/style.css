@@ -347,6 +347,16 @@ textarea {
   accent-color: var(--accent);
 }
 
+.font-control select {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 13px;
+}
+
 .toolbar__spacer {
   flex: 1 1 0;
 }
@@ -594,6 +604,14 @@ textarea {
 .page__delete:disabled {
   opacity: 0.3;
   cursor: default;
+}
+
+.board__stage.is-pannable {
+  cursor: grab;
+}
+
+.board__stage.is-panning {
+  cursor: grabbing;
 }
 
 .board canvas {

@@ -211,6 +211,10 @@ class ShapeAdd(_Message):
     fill: str | None = Field(default=None, pattern=COLOR_PATTERN)
 
 
+TEXT_FONT_VALUES = ("sans", "serif", "mono", "hand", "narrow")
+TextFontFamily = Literal["sans", "serif", "mono", "hand", "narrow"]
+
+
 class TextAdd(_Message):
     type: Literal["text_add"]
     objectId: str = Field(pattern=OBJECT_ID_PATTERN)
@@ -219,6 +223,7 @@ class TextAdd(_Message):
     y: float = Field(ge=COORD_MIN, le=COORD_MAX)
     color: str = Field(pattern=COLOR_PATTERN)
     fontSize: float = Field(ge=8, le=200)
+    fontFamily: TextFontFamily = "sans"
 
 
 class ImageAdd(_Message):
@@ -289,6 +294,12 @@ class TextUpdate(_Message):
     type: Literal["text_update"]
     objectId: str = Field(pattern=OBJECT_ID_PATTERN)
     content: str = Field(min_length=1, max_length=2000)
+
+
+class TextFont(_Message):
+    type: Literal["text_font"]
+    objectId: str = Field(pattern=OBJECT_ID_PATTERN)
+    fontFamily: TextFontFamily
 
 
 class ObjectDelete(_Message):
@@ -427,6 +438,7 @@ ClientMessage = Annotated[
     | FrameStyle
     | ObjectTransform
     | TextUpdate
+    | TextFont
     | ObjectDelete
     | ObjectLock
     | Undo

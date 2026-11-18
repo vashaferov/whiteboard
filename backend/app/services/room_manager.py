@@ -720,7 +720,6 @@ class RoomManager:
     ) -> bool:
         if room.get_workspace(workspace_id) is None:
             return False
-        self.clear_history(room, user.id)
         async with user.workspace_lock:
             old_id = user.workspace_id
             if old_id == workspace_id:

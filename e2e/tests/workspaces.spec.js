@@ -259,3 +259,26 @@ test('pull preserves a text draft on the old page', async ({ browser, request })
   await teacherContext.close();
   await studentContext.close();
 });
+
+test('undo works after leaving and returning to a page', async ({ page, request }) => {
+  const setup = await lessonSetup(request, { name: 'Undo across pages', student: false });
+  await signInWith(request, page, setup.teacherLogin);
+  await openRoom(page, setup.room.id);
+
+  await drawRect(page, { x: 300, y: 300 }, { x: 420, y: 390 });
+  await expect.poll(() => objectCount(page)).toBe(1);
+
+  await createPage(page, 'Вторая');
+  await drawRect(page, { x: 500, y: 300 }, { x: 620, y: 390 });
+  await expect.poll(() => objectCount(page)).toBe(1);
+
+  await selectPage(page, 'Страница 1');
+  await expect.poll(() => objectCount(page)).toBe(1);
+  await page.click('#undo-btn');
+  await expect.poll(() => objectCount(page)).toBe(0);
+
+  await selectPage(page, 'Вторая');
+  await expect.poll(() => objectCount(page)).toBe(1);
+  await page.click('#undo-btn');
+  await expect.poll(() => objectCount(page)).toBe(0);
+});

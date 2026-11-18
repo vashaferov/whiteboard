@@ -53,6 +53,7 @@ export class ToolManager {
     this.tool = 'brush';
     this.color = '#2563eb';
     this.width = 4;
+    this.fontFamily = 'sans';
     this.stroke = null;
     this.shape = null;
     this.pendingTouch = null;
@@ -83,10 +84,15 @@ export class ToolManager {
     if (width) this.width = width;
   }
 
+  setFontFamily(fontFamily) {
+    this.fontFamily = fontFamily;
+  }
+
   getTextStyle() {
     return {
       color: this.color,
       fontSize: Math.min(96, Math.max(16, Math.round(this.width * 6))),
+      fontFamily: this.fontFamily,
     };
   }
 
