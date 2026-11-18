@@ -55,6 +55,7 @@ export class ToolManager {
     this.width = 4;
     this.stroke = null;
     this.shape = null;
+    this.pendingTouch = null;
     this.lastSentAt = 0;
 
     this._onPointerDown = (event) => this._handleDown(event);
@@ -72,6 +73,7 @@ export class ToolManager {
     if (this.tool === tool) return;
     this._finishStroke();
     this._cancelShape();
+    this.pendingTouch = null;
     this.tool = tool;
     this.board.setSelectMode(tool === 'select');
   }
@@ -93,6 +95,7 @@ export class ToolManager {
   }
 
   _handleDown(event) {
+    if (this.board.isGesturing?.()) return;
     const nativeEvent = event.evt;
     if (nativeEvent && typeof nativeEvent.button === 'number' && nativeEvent.button !== 0) {
       return;
@@ -106,6 +109,11 @@ export class ToolManager {
       this.erasing = true;
       this._erase(point);
     } else if (STROKE_TOOLS.has(this.tool)) {
+      // На касании не начинаем штрих сразу: второй палец означает pinch.
+      if (nativeEvent?.pointerType === 'touch') {
+        this.pendingTouch = point;
+        return;
+      }
       this._startStroke(point);
     } else if (SHAPE_TOOLS.has(this.tool)) {
       this._connectorStart = null;
@@ -124,9 +132,22 @@ export class ToolManager {
   }
 
   _handleMove() {
+    if (this.board.isGesturing?.()) return;
     if (this.erasing) {
       const point = this.board.getPointer();
       if (point) this._erase(point);
+      return;
+    }
+
+    if (this.pendingTouch && !this.stroke) {
+      const point = this.board.getPointer();
+      if (!point) return;
+      const moved = Math.hypot(point.x - this.pendingTouch.x, point.y - this.pendingTouch.y);
+      if (moved > 2) {
+        const start = this.pendingTouch;
+        this.pendingTouch = null;
+        this._startStroke(start);
+      }
       return;
     }
 
@@ -155,6 +176,7 @@ export class ToolManager {
 
   _handleUp() {
     this.erasing = false;
+    this.pendingTouch = null;
     if (this.stroke) {
       this._finishStroke();
     }
@@ -171,8 +193,24 @@ export class ToolManager {
 
   // Commit whatever is in progress before the student's page changes.
   finishActiveStroke() {
+    this.pendingTouch = null;
     this._finishStroke();
     this._cancelShape();
+  }
+
+  // Завершаем начатое, когда начинается жест двумя пальцами; одиночная точка отменяется.
+  cancelOrFinishStroke() {
+    this.pendingTouch = null;
+    this._cancelShape();
+    if (!this.stroke) return;
+    const stroke = this.stroke;
+    if (stroke.points.length > 1) {
+      this._finishStroke();
+      return;
+    }
+    this.stroke = null;
+    this.board.removeObject(stroke.id);
+    this.onEvent({ type: 'object_delete', objectId: stroke.id });
   }
 
   // ------------------------------------------------------------------ strokes

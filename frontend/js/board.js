@@ -135,11 +135,24 @@ export class Board {
     this.panX = 0;
     this.panY = 0;
     this.onViewChange = options.onViewChange ?? (() => {});
+    this.onGestureStart = options.onGestureStart ?? (() => {});
+    this.pointers = new Map();
+    this.gesture = null;
 
     this._onWindowResize = () => this.layout();
     window.addEventListener('resize', this._onWindowResize);
     this.resizeObserver = new ResizeObserver(() => this.layout());
     this.resizeObserver.observe(container);
+
+    this._onPointerDown = (event) => this._trackPointerDown(event);
+    this._onPointerMove = (event) => this._trackPointerMove(event);
+    this._onPointerUp = (event) => this._trackPointerUp(event);
+    this._onWheel = (event) => this._handleWheel(event);
+    container.addEventListener('pointerdown', this._onPointerDown);
+    container.addEventListener('pointermove', this._onPointerMove);
+    container.addEventListener('pointerup', this._onPointerUp);
+    container.addEventListener('pointercancel', this._onPointerUp);
+    container.addEventListener('wheel', this._onWheel, { passive: false });
 
     this.stage.on('pointerdown', (event) => this._handleStagePointerDown(event));
     this.stage.on('dblclick dbltap', (event) => this._handleStageDoubleClick(event));
@@ -244,6 +257,75 @@ export class Board {
     this.panY += dy;
     this._clampView(containerWidth, containerHeight);
     this._applyView(containerWidth, containerHeight);
+  }
+
+  _pointerPoint(event) {
+    const rect = this.container.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  isGesturing() {
+    return Boolean(this.gesture);
+  }
+
+  _trackPointerDown(event) {
+    if (event.pointerType !== 'touch') return;
+    this.pointers.set(event.pointerId, this._pointerPoint(event));
+    if (this.pointers.size === 2) this._startGesture();
+  }
+
+  _startGesture() {
+    const [first, second] = [...this.pointers.values()];
+    const mid = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+    this.gesture = {
+      startZoom: this.zoom,
+      startDistance: Math.max(1, Math.hypot(first.x - second.x, first.y - second.y)),
+      world: {
+        x: (mid.x - this.offsetX) / this.scale,
+        y: (mid.y - this.offsetY) / this.scale,
+      },
+    };
+    this.onGestureStart();
+  }
+
+  _trackPointerMove(event) {
+    if (!this.pointers.has(event.pointerId)) return;
+    this.pointers.set(event.pointerId, this._pointerPoint(event));
+    if (this.pointers.size < 2 || !this.gesture) return;
+    const [first, second] = [...this.pointers.values()];
+    const mid = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+    const distance = Math.max(1, Math.hypot(first.x - second.x, first.y - second.y));
+    const containerWidth = Math.max(1, this.container.clientWidth);
+    const containerHeight = Math.max(1, this.container.clientHeight);
+    this.zoom = clamp(
+      this.gesture.startZoom * (distance / this.gesture.startDistance),
+      MIN_ZOOM,
+      MAX_ZOOM,
+    );
+    const scale = this.fitScale * this.zoom;
+    this.panX =
+      mid.x - this.gesture.world.x * scale - (containerWidth - this.width * scale) / 2;
+    this.panY =
+      mid.y - this.gesture.world.y * scale - (containerHeight - this.height * scale) / 2;
+    this._clampView(containerWidth, containerHeight);
+    this._applyView(containerWidth, containerHeight);
+  }
+
+  _trackPointerUp(event) {
+    this.pointers.delete(event.pointerId);
+    if (this.pointers.size < 2) this.gesture = null;
+  }
+
+  _handleWheel(event) {
+    event.preventDefault();
+    const point = this._pointerPoint(event);
+    if (event.ctrlKey || event.metaKey) {
+      this.zoomAt(Math.exp(-event.deltaY * 0.0015), point);
+      return;
+    }
+    const dx = event.shiftKey ? -event.deltaY : -event.deltaX;
+    const dy = event.shiftKey ? 0 : -event.deltaY;
+    this.panBy(dx, dy);
   }
 
   setBoardSize(width, height) {
@@ -1488,6 +1570,11 @@ export class Board {
     this.destroyed = true;
     this.resizeObserver?.disconnect();
     window.removeEventListener('resize', this._onWindowResize);
+    this.container.removeEventListener('pointerdown', this._onPointerDown);
+    this.container.removeEventListener('pointermove', this._onPointerMove);
+    this.container.removeEventListener('pointerup', this._onPointerUp);
+    this.container.removeEventListener('pointercancel', this._onPointerUp);
+    this.container.removeEventListener('wheel', this._onWheel);
     this.stage.destroy();
   }
 }

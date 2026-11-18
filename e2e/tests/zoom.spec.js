@@ -98,3 +98,95 @@ test('export keeps the current zoom', async ({ page, request }) => {
   expect(after.x).toBeCloseTo(before.x, 1);
   expect(after.y).toBeCloseTo(before.y, 1);
 });
+
+async function worldUnderPagePoint(page, point) {
+  return page.evaluate(({ pageX, pageY }) => {
+    const stage = window.Konva.stages[0];
+    const box = document.querySelector('#board').getBoundingClientRect();
+    return {
+      x: (pageX - box.x - stage.x()) / stage.scaleX(),
+      y: (pageY - box.y - stage.y()) / stage.scaleY(),
+    };
+  }, point);
+}
+
+test('ctrl+wheel zooms around the cursor', async ({ page, request }) => {
+  await openTeacherRoom(page, request);
+  const box = await page.locator('#board').boundingBox();
+  const point = { pageX: box.x + box.width * 0.4, pageY: box.y + box.height * 0.4 };
+  const before = await worldUnderPagePoint(page, point);
+
+  await page.evaluate(({ pageX, pageY }) => {
+    document.querySelector('#board-stage').dispatchEvent(
+      new WheelEvent('wheel', {
+        deltaY: -120,
+        ctrlKey: true,
+        clientX: pageX,
+        clientY: pageY,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }, point);
+
+  await expect(page.locator('#zoom-reset')).not.toHaveText('100%');
+  const after = await worldUnderPagePoint(page, point);
+  expect(Math.abs(after.x - before.x)).toBeLessThan(2);
+  expect(Math.abs(after.y - before.y)).toBeLessThan(2);
+});
+
+test('wheel pans a zoomed board', async ({ page, request }) => {
+  await openTeacherRoom(page, request);
+  await page.click('#zoom-in');
+  await page.click('#zoom-in');
+  const before = await stageView(page);
+
+  await page.evaluate(() => {
+    document.querySelector('#board-stage').dispatchEvent(
+      new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }),
+    );
+  });
+
+  const after = await stageView(page);
+  expect(after.y).toBeCloseTo(before.y - 120, 0);
+  expect(after.x).toBeCloseTo(before.x, 0);
+});
+
+test('two fingers pinch, pan and do not leave stray objects', async ({ page, request }) => {
+  await openTeacherRoom(page, request);
+  const box = await page.locator('#board').boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const client = await page.context().newCDPSession(page);
+  await client.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
+
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [
+      { x: cx - 60, y: cy, id: 1 },
+      { x: cx + 60, y: cy, id: 2 },
+    ],
+  });
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [
+      { x: cx - 120, y: cy, id: 1 },
+      { x: cx + 120, y: cy, id: 2 },
+    ],
+  });
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+
+  await expect(page.locator('#zoom-reset')).toHaveText('200%');
+  expect(await objectCount(page)).toBe(0);
+
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x: cx, y: cy, id: 3 }],
+  });
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [{ x: cx + 80, y: cy + 40, id: 3 }],
+  });
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await expect.poll(() => objectCount(page)).toBe(1);
+});

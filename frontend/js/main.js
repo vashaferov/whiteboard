@@ -296,6 +296,7 @@ function startRoom({ room, user, permissions, board }) {
       updateLockButton();
     },
     onViewChange: (percent) => updateZoomControls(percent),
+    onGestureStart: () => state.tools?.cancelOrFinishStroke(),
   });
 
   state.tools = new ToolManager({
