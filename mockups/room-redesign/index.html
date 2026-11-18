@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Онлайн-доска — макет комнаты</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body data-role="teacher" data-presentation="false">
+    <div class="room">
+      <header class="topbar">
+        <div class="topbar__left">
+          <button class="icon-btn" type="button" data-action="back" aria-label="К комнатам" title="К комнатам">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M19 12H5" />
+              <path d="M11 6l-6 6 6 6" />
+            </svg>
+          </button>
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="13" rx="2.5" />
+              <path d="M7.5 9.5c1.6-1.8 3.2 1.8 4.9 0 1.4-1.5 2.6.4 3.6.8" />
+              <path d="M9 21l3-4 3 4" />
+            </svg>
+          </span>
+          <div class="room-title">
+            <strong title="Алгебра, 8 класс">Алгебра, 8 класс</strong>
+            <span id="role-chip" class="role-chip">Учитель</span>
+          </div>
+        </div>
+
+        <div class="topbar__center">
+          <span id="context-chip" class="context-chip">Страница 1</span>
+        </div>
+
+        <div class="topbar__right">
+          <span class="connection" title="Соединение установлено">
+            <i aria-hidden="true"></i><span>Подключено</span>
+          </span>
+          <button id="top-avatars" class="avatars" type="button" data-action="toggle-users" aria-label="Участники"></button>
+          <button class="icon-btn mobile-only" type="button" data-action="toggle-pages" aria-label="Страницы" title="Страницы">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="4" y="4" width="13" height="16" rx="2" />
+              <path d="M17 7h2a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-9" />
+              <path d="M8 8h5M8 12h5" />
+            </svg>
+          </button>
+          <div class="popover-wrap">
+            <button class="icon-btn" type="button" data-action="more" aria-label="Ещё" aria-haspopup="true" aria-expanded="false" title="Ещё">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
+              </svg>
+            </button>
+            <div id="more-popover" class="popover popover--menu" hidden></div>
+          </div>
+          <div class="popover-wrap demo-wrap">
+            <button class="demo-trigger" type="button" data-action="demo" aria-haspopup="true" aria-expanded="false">Демо</button>
+            <div id="demo-popover" class="popover demo-popover" hidden>
+              <p class="popover__label">Макет · роль</p>
+              <div class="segmented" id="demo-roles">
+                <button type="button" data-demo-role="teacher" class="is-active">Учитель</button>
+                <button type="button" data-demo-role="student">Ученик</button>
+                <button type="button" data-demo-role="admin">Админ</button>
+              </div>
+              <label class="switch-row">
+                <input id="demo-presentation" type="checkbox" />
+                <span>Режим презентации</span>
+              </label>
+            </div>
+          </div>
+          <button class="btn btn--ghost btn--sm leave-btn" type="button" data-action="leave">Выйти</button>
+        </div>
+      </header>
+
+      <div class="toolbar-shell">
+        <div id="tool-dock" class="tool-dock" role="toolbar" aria-label="Инструменты"></div>
+      </div>
+
+      <div class="room-body">
+        <aside id="pages-panel" class="pages-panel" aria-label="Страницы"></aside>
+
+        <main class="stage">
+          <div class="board-wrap">
+            <div class="board" aria-label="Доска">
+              <svg class="board-layer board-lesson" viewBox="0 0 1600 900" role="img" aria-label="Урок: квадратные уравнения">
+                <defs>
+                  <pattern id="board-dots" width="32" height="32" patternUnits="userSpaceOnUse">
+                    <circle cx="2.5" cy="2.5" r="1.5" fill="#dbe4f0" />
+                  </pattern>
+                  <linearGradient id="board-fade" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#ffffff" />
+                    <stop offset="1" stop-color="#fbfdff" />
+                  </linearGradient>
+                </defs>
+                <rect width="1600" height="900" fill="url(#board-fade)" />
+                <rect width="1600" height="900" fill="url(#board-dots)" opacity="0.55" />
+                <g font-family="Inter, Segoe UI, sans-serif">
+                  <text x="110" y="132" font-size="54" font-weight="700" fill="#0f172a">Квадратные уравнения</text>
+                  <text x="110" y="184" font-size="24" fill="#64748b">Урок 12 · повторение и практика</text>
+                  <path d="M110 214h590" stroke="#dbe4f0" stroke-width="3" stroke-linecap="round" />
+
+                  <rect x="110" y="252" width="560" height="120" rx="18" fill="#eef4ff" stroke="#cfe0ff" />
+                  <text x="150" y="332" font-size="44" fill="#1d4ed8" font-family="Cambria, Georgia, serif">x² + 5x + 6 = 0</text>
+
+                  <text x="110" y="432" font-size="25" fill="#64748b">1. Находим дискриминант</text>
+                  <rect x="110" y="458" width="430" height="70" rx="14" fill="#f0fdf4" stroke="#bbf7d0" />
+                  <text x="140" y="504" font-size="34" fill="#15803d">D = 25 − 24 = 1</text>
+
+                  <text x="110" y="590" font-size="25" fill="#64748b">2. Корни уравнения</text>
+                  <rect x="110" y="616" width="430" height="80" rx="14" fill="#fff7ed" stroke="#fed7aa" />
+                  <text x="140" y="668" font-size="38" fill="#b45309">x₁ = −2,  x₂ = −3</text>
+
+                  <g transform="translate(900,250)">
+                    <rect width="560" height="420" rx="20" fill="#f8fafc" stroke="#e2e8f0" />
+                    <path d="M80 330h420M280 50v320" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" />
+                    <path d="M120 80Q280 500 440 80" fill="none" stroke="#2563eb" stroke-width="5" stroke-linecap="round" />
+                    <circle cx="220" cy="330" r="7" fill="#dc2626" />
+                    <circle cx="340" cy="330" r="7" fill="#dc2626" />
+                    <text x="200" y="368" font-size="22" fill="#dc2626">−3</text>
+                    <text x="328" y="368" font-size="22" fill="#dc2626">−2</text>
+                    <text x="26" y="34" font-size="20" fill="#94a3b8">y = x² + 5x + 6</text>
+                  </g>
+
+                  <path d="M1090 752C1000 752 908 712 866 654" fill="none" stroke="#f59e0b" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 9" />
+                  <g transform="translate(1118,712) rotate(-3)">
+                    <rect width="342" height="122" rx="8" fill="#fef3c7" stroke="#fcd34d" />
+                    <text x="22" y="36" font-size="20" fill="#92400e">Проверка:</text>
+                    <text x="22" y="70" font-size="20" fill="#92400e" font-family="Segoe Print, Comic Sans MS, cursive">(−2)² + 5·(−2) + 6 = 0</text>
+                    <text x="22" y="100" font-size="20" fill="#92400e">Верно!</text>
+                  </g>
+
+                  <g id="board-cursor" transform="translate(1010,472)">
+                    <path id="cursor-pointer" d="M0 0l19 44 8-18 19-8z" fill="#7c3aed" />
+                    <rect id="cursor-tag" x="24" y="30" width="96" height="26" rx="8" fill="#7c3aed" />
+                    <text id="cursor-name" x="36" y="48" font-size="14" fill="#ffffff">Софья</text>
+                  </g>
+                </g>
+              </svg>
+
+              <svg class="board-layer board-slide" viewBox="0 0 1600 900" role="img" aria-label="Слайд презентации">
+                <rect width="1600" height="900" fill="#ffffff" />
+                <rect width="1600" height="14" fill="#2563eb" />
+                <g font-family="Inter, Segoe UI, sans-serif">
+                  <text x="110" y="154" font-size="62" font-weight="700" fill="#0f172a">Квадратные уравнения</text>
+                  <text x="110" y="208" font-size="28" fill="#64748b">Решение через дискриминант</text>
+                  <path d="M110 244h1380" stroke="#e2e8f0" stroke-width="2" />
+                  <text x="110" y="330" font-size="25" fill="#64748b">Формула дискриминанта</text>
+                  <rect x="110" y="356" width="600" height="96" rx="16" fill="#eef4ff" stroke="#cfe0ff" />
+                  <text x="146" y="420" font-size="40" fill="#1d4ed8" font-family="Cambria, Georgia, serif">D = b² − 4ac</text>
+                  <text x="110" y="520" font-size="25" fill="#64748b">Корни</text>
+                  <rect x="110" y="546" width="600" height="96" rx="16" fill="#f0fdf4" stroke="#bbf7d0" />
+                  <text x="146" y="610" font-size="40" fill="#15803d">x₁ = −2,  x₂ = −3</text>
+                  <g transform="translate(870,300)">
+                    <rect width="590" height="390" rx="20" fill="#f8fafc" stroke="#e2e8f0" />
+                    <path d="M80 320h440M300 50v310" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" />
+                    <path d="M120 76Q300 486 470 76" fill="none" stroke="#2563eb" stroke-width="5" stroke-linecap="round" />
+                    <circle cx="236" cy="320" r="7" fill="#dc2626" />
+                    <circle cx="364" cy="320" r="7" fill="#dc2626" />
+                    <text x="214" y="358" font-size="22" fill="#dc2626">−3</text>
+                    <text x="350" y="358" font-size="22" fill="#dc2626">−2</text>
+                  </g>
+                  <text x="110" y="820" font-size="22" fill="#94a3b8">Алгебра · 8 класс</text>
+                  <text id="slide-number" x="1400" y="820" font-size="22" fill="#94a3b8">3 / 12</text>
+                </g>
+              </svg>
+            </div>
+          </div>
+
+          <div class="zoom" role="group" aria-label="Масштаб">
+            <button class="zoom__button" type="button" data-zoom="out" aria-label="Отдалить">−</button>
+            <button class="zoom__value" type="button" data-zoom="reset" title="Вписать доску">100%</button>
+            <button class="zoom__button" type="button" data-zoom="in" aria-label="Приблизить">+</button>
+          </div>
+
+          <div id="slide-bar" class="slide-bar" hidden>
+            <button id="slide-prev" class="slide-bar__button" type="button" aria-label="Предыдущий слайд">‹</button>
+            <span class="slide-bar__live"><i></i><span id="slide-live-text">Презентация</span></span>
+            <span id="slide-counter" class="slide-bar__counter">3 / 12</span>
+            <button id="slide-next" class="slide-bar__button" type="button" aria-label="Следующий слайд">›</button>
+          </div>
+
+          <div id="view-badge" class="view-badge" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" />
+              <circle cx="12" cy="12" r="2.5" />
+            </svg>
+            Только просмотр
+          </div>
+        </main>
+
+        <aside id="users-panel" class="users-panel" aria-label="Участники"></aside>
+      </div>
+
+      <div id="sheet-backdrop" class="sheet-backdrop" hidden></div>
+      <div id="mobile-dock" class="mobile-dock" role="toolbar" aria-label="Инструменты"></div>
+      <div id="mobile-sheet" class="mobile-sheet" hidden></div>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
