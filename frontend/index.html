@@ -294,7 +294,16 @@
         ></div>
 
         <aside id="users-panel" class="users-panel">
-          <h2 class="users-panel__title">Участники <span id="user-count"></span></h2>
+          <div class="users-panel__header">
+            <h2 class="users-panel__title">Участники <span id="user-count"></span></h2>
+            <button
+              id="users-toggle"
+              class="panel-toggle"
+              type="button"
+              aria-label="Свернуть участников"
+              aria-expanded="true"
+            >»</button>
+          </div>
           <ul id="user-list" class="user-list"></ul>
           <div id="pull-actions" class="users-panel__pull" hidden>
             <button id="pull-selected" class="btn btn--ghost" type="button">К себе</button>

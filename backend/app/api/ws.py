@@ -103,6 +103,7 @@ PRESENTATION_ALLOWED = {
     "stroke_end",
     "cursor",
     "presentation_slide",
+    "undo",
     "kick",
     "workspace_switch",
     "workspace_create",
@@ -125,6 +126,18 @@ def _locked_for(user: ConnectedUser, room: Room, obj: dict[str, Any]) -> bool:
     return bool(frame and frame.get("locked"))
 
 
+def _push_history(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    entry: dict[str, Any],
+) -> None:
+    workspace = room.get_workspace(user.workspace_id)
+    if workspace and workspace.get("kind") == PRESENTATION_KIND:
+        entry["slide"] = int(workspace.get("slideIndex", 0) or 0)
+    manager.push_history(room, user.id, user.workspace_id, entry)
+
+
 def _push_create(
     manager: RoomManager,
     room: Room,
@@ -132,10 +145,10 @@ def _push_create(
     object_id: str,
     fields: dict[str, Any] | None = None,
 ) -> None:
-    manager.push_history(
+    _push_history(
+        manager,
         room,
-        user.id,
-        user.workspace_id,
+        user,
         {"created": [object_id], "fields": fields or {}},
     )
 
@@ -152,7 +165,7 @@ def _push_fields(
         for obj in objects
         if obj is not None
     }
-    manager.push_history(room, user.id, user.workspace_id, {"fields": fields})
+    _push_history(manager, room, user, {"fields": fields})
 
 
 def _push_delete(
@@ -166,7 +179,7 @@ def _push_delete(
         for obj in objects
         if obj in room.objects
     ]
-    manager.push_history(room, user.id, user.workspace_id, {"deleted": deleted})
+    _push_history(manager, room, user, {"deleted": deleted})
 
 
 def _frame_rect(frame: dict[str, Any]) -> tuple[float, float, float, float]:
@@ -1116,8 +1129,17 @@ async def _handle_undo(
 ) -> None:
     if not await _check_workspace(manager, user, message):
         return
+    workspace = room.get_workspace(user.workspace_id)
+    presentation = bool(workspace and workspace.get("kind") == PRESENTATION_KIND)
+    if presentation and not is_staff(user.role):
+        await manager.send_to(
+            user,
+            _error("presentation_view_only", "На презентации доступна только кисть учителя"),
+        )
+        return
+    slide_index = int(workspace.get("slideIndex", 0) or 0) if presentation else None
     for _ in range(50):
-        entry = manager.pop_history(room, user.id, user.workspace_id)
+        entry = manager.pop_history(room, user.id, user.workspace_id, slide_index)
         if entry is None:
             break
         removed: list[str] = []

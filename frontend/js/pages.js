@@ -5,7 +5,16 @@
  */
 
 export class PagesPanel {
-  constructor({ container, onSelect, onCreate, onCreatePresentation, onRename, onDelete, onMove }) {
+  constructor({
+    container,
+    onSelect,
+    onCreate,
+    onCreatePresentation,
+    onRename,
+    onDelete,
+    onMove,
+    onToggleCollapse,
+  }) {
     this.container = container;
     this.onSelect = onSelect;
     this.onCreate = onCreate;
@@ -13,13 +22,24 @@ export class PagesPanel {
     this.onRename = onRename;
     this.onDelete = onDelete;
     this.onMove = onMove;
+    this.onToggleCollapse = onToggleCollapse;
   }
 
-  render(workspaces, activeId, { canManage = false, busy = false } = {}) {
+  render(workspaces, activeId, { canManage = false, busy = false, collapsed = false } = {}) {
     this.container.replaceChildren();
 
     const header = document.createElement('div');
     header.className = 'pages-panel__header';
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.id = 'pages-toggle';
+    toggle.className = 'panel-toggle';
+    toggle.textContent = collapsed ? '»' : '«';
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.setAttribute('aria-label', collapsed ? 'Развернуть страницы' : 'Свернуть страницы');
+    toggle.addEventListener('click', () => this.onToggleCollapse?.());
+    header.appendChild(toggle);
 
     const title = document.createElement('h2');
     title.className = 'pages-panel__title';

@@ -57,6 +57,11 @@ test('presentation: teacher uploads a PDF, edits slides and a student only watch
   await expect.poll(() => objectCount(teacher)).toBe(0);
   await drawBrush(teacher, { x: 420, y: 220 }, { x: 620, y: 220 });
   await expect.poll(() => objectCount(teacher)).toBe(1);
+  await expect(teacher.locator('#undo-btn')).toBeVisible();
+  await teacher.click('#undo-btn');
+  await expect.poll(() => objectCount(teacher)).toBe(0);
+  await drawBrush(teacher, { x: 420, y: 220 }, { x: 620, y: 220 });
+  await expect.poll(() => objectCount(teacher)).toBe(1);
 
   await teacher.click('#slide-prev');
   await expect.poll(() => teacher.locator('#slide-counter').textContent()).toBe('1 / 2');
@@ -78,6 +83,11 @@ test('presentation: teacher uploads a PDF, edits slides and a student only watch
   await student.mouse.up();
   await student.waitForTimeout(300);
   expect(await objectCount(student)).toBe(1);
+
+  await expect(student.locator('#undo-btn')).toBeHidden();
+  await teacher.click('#undo-btn');
+  await expect.poll(() => objectCount(teacher)).toBe(0);
+  await expect.poll(() => objectCount(student)).toBe(0);
 
   await student.click('#zoom-in');
   await expect(student.locator('#zoom-reset')).toHaveText('125%');
