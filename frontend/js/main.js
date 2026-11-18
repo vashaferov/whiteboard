@@ -1496,6 +1496,19 @@ function bindKeyboard() {
     }
     if (event.altKey) return;
 
+    if (['+', '=', '-', '_', '0'].includes(event.key)) {
+      if (!state.board) return;
+      event.preventDefault();
+      if (event.key === '0') {
+        state.board.resetView();
+        return;
+      }
+      const center = { x: els.board.clientWidth / 2, y: els.board.clientHeight / 2 };
+      const factor = event.key === '-' || event.key === '_' ? 1 / ZOOM_STEP : ZOOM_STEP;
+      state.board.zoomAt(factor, center);
+      return;
+    }
+
     const tool = TOOL_KEYS[event.key.toLowerCase()];
     if (tool) {
       selectTool(tool);

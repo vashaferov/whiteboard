@@ -79,6 +79,10 @@ test('presentation: teacher uploads a PDF, edits slides and a student only watch
   await student.waitForTimeout(300);
   expect(await objectCount(student)).toBe(1);
 
+  await student.click('#zoom-in');
+  await expect(student.locator('#zoom-reset')).toHaveText('125%');
+  await expect(student.locator('#slide-next')).toBeHidden();
+
   await teacher.click('#slide-next');
   await expect.poll(() => student.locator('#slide-counter').textContent()).toBe('2 / 2');
   await expect.poll(() => objectCount(student)).toBe(1);

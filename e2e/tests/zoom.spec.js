@@ -190,3 +190,15 @@ test('two fingers pinch, pan and do not leave stray objects', async ({ page, req
   await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await expect.poll(() => objectCount(page)).toBe(1);
 });
+
+test('keyboard zooms and resets', async ({ page, request }) => {
+  await openTeacherRoom(page, request);
+  await page.keyboard.press('=');
+  await expect(page.locator('#zoom-reset')).toHaveText('125%');
+  await page.keyboard.press('-');
+  await expect(page.locator('#zoom-reset')).toHaveText('100%');
+  await page.keyboard.press('-');
+  await expect(page.locator('#zoom-reset')).toHaveText('80%');
+  await page.keyboard.press('0');
+  await expect(page.locator('#zoom-reset')).toHaveText('100%');
+});
