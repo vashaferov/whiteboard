@@ -30,6 +30,16 @@ test('mobile: toolbar is usable and drawing works on a phone viewport', async ({
   expect(box.width).toBeGreaterThan(200);
   expect(box.height).toBeGreaterThan(200);
 
+  const pagesPanel = page.locator('#pages-panel');
+  const fullHeight = (await pagesPanel.boundingBox()).height;
+  await page.tap('#pages-toggle');
+  await expect
+    .poll(async () => (await pagesPanel.boundingBox()).height)
+    .toBeLessThan(fullHeight);
+  await expect(page.locator('.page-list')).toBeHidden();
+  await page.tap('#pages-toggle');
+  await expect(page.locator('.page-list')).toBeVisible();
+
   const tools = page.locator('#tools');
   await expect(tools).toBeVisible();
   await expect(page.locator('[data-tool="rect"]')).toBeVisible();

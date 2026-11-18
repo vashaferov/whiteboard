@@ -47,6 +47,44 @@ test('sidebar: a long participant name can be revealed by resizing', async ({ br
   await context.close();
 });
 
+test('sidebar: pages and participants collapse and remember the state', async ({
+  page,
+  request,
+}) => {
+  const setup = await lessonSetup(request, { name: 'Sidebar toggle', student: false });
+  await signInWith(request, page, setup.teacherLogin);
+  await openRoom(page, setup.room.id);
+
+  const pages = page.locator('#pages-panel');
+  const users = page.locator('#users-panel');
+  const board = page.locator('#board');
+  const widthOf = async (locator) => (await locator.boundingBox()).width;
+
+  const initialBoard = await widthOf(board);
+  expect(await widthOf(pages)).toBeGreaterThan(150);
+
+  await page.click('#pages-toggle');
+  await expect.poll(() => widthOf(pages)).toBeLessThan(60);
+  await expect(page.locator('.page-list')).toBeHidden();
+  await expect.poll(() => widthOf(board)).toBeGreaterThan(initialBoard + 100);
+
+  const afterPages = await widthOf(board);
+  await page.click('#users-toggle');
+  await expect.poll(() => widthOf(users)).toBeLessThan(60);
+  await expect(page.locator('#users-resizer')).toBeHidden();
+  await expect.poll(() => widthOf(board)).toBeGreaterThan(afterPages + 100);
+
+  await openRoom(page, setup.room.id);
+  await expect.poll(() => widthOf(pages)).toBeLessThan(60);
+  await expect.poll(() => widthOf(users)).toBeLessThan(60);
+
+  await page.click('#pages-toggle');
+  await expect.poll(() => widthOf(pages)).toBeGreaterThan(150);
+  await page.click('#users-toggle');
+  await expect.poll(() => widthOf(users)).toBeGreaterThan(150);
+  await expect(page.locator('#users-resizer')).toBeVisible();
+});
+
 test('cursor: ink stays contrasting for light and dark participant colors', async ({
   browser,
   request,

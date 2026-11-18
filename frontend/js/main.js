@@ -11,6 +11,8 @@ import { initDashboard, showDashboard } from './dashboard.js';
 
 const ROOM_KEY = 'wb:room';
 const USERS_PANEL_KEY = 'wb:usersPanelWidth';
+const PAGES_COLLAPSED_KEY = 'wb:pagesCollapsed';
+const USERS_COLLAPSED_KEY = 'wb:usersCollapsed';
 const USERS_PANEL_MIN = 200;
 const USERS_PANEL_MAX = 560;
 const USERS_PANEL_DEFAULT = 232;
@@ -113,6 +115,7 @@ function init() {
   buildPalette();
   buildFramePanel();
   bindUsersResizer();
+  bindSidebarToggles();
   bindToolbar();
   bindTextEditor();
   bindKeyboard();
@@ -176,6 +179,7 @@ function cacheElements() {
   els.userCount = $('#user-count');
   els.usersPanel = $('#users-panel');
   els.usersResizer = $('#users-resizer');
+  els.usersToggle = $('#users-toggle');
   els.pullActions = $('#pull-actions');
   els.pullSelected = $('#pull-selected');
   els.pullAll = $('#pull-all');
@@ -317,6 +321,10 @@ function startRoom({ room, user, permissions, board }) {
     onRename: (workspace) => requestWorkspaceRename(workspace),
     onDelete: (workspace) => requestWorkspaceDelete(workspace),
     onMove: (id, direction) => requestWorkspaceMove(id, direction),
+    onToggleCollapse: () => {
+      setPagesCollapsed(!els.pagesPanel.classList.contains('is-collapsed'));
+      renderPages();
+    },
   });
   renderPages();
 
@@ -964,6 +972,7 @@ function renderPages() {
   pagesPanel?.render(state.workspaces, state.workspaceId, {
     canManage: canManageWorkspaces(),
     busy: Boolean(state.pendingWorkspaceId || state.moveRequestId),
+    collapsed: els.pagesPanel.classList.contains('is-collapsed'),
   });
 }
 
@@ -1629,8 +1638,48 @@ function bindUsersResizer() {
   });
 
   window.addEventListener('resize', () => {
+    if (els.usersPanel.classList.contains('is-collapsed')) return;
     applyUsersPanelWidth(els.usersPanel.getBoundingClientRect().width);
   });
+}
+
+function setPagesCollapsed(collapsed, { persist = true } = {}) {
+  els.pagesPanel.classList.toggle('is-collapsed', collapsed);
+  const toggle = $('#pages-toggle');
+  if (toggle) {
+    toggle.textContent = collapsed ? '»' : '«';
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.setAttribute('aria-label', collapsed ? 'Развернуть страницы' : 'Свернуть страницы');
+  }
+  if (persist) localStorage.setItem(PAGES_COLLAPSED_KEY, collapsed ? '1' : '0');
+  state.board?.layout?.();
+}
+
+function setUsersCollapsed(collapsed, { persist = true } = {}) {
+  els.usersPanel.classList.toggle('is-collapsed', collapsed);
+  els.usersResizer.hidden = collapsed;
+  if (collapsed) {
+    els.usersPanel.style.width = '';
+  } else {
+    const saved = Number(localStorage.getItem(USERS_PANEL_KEY));
+    applyUsersPanelWidth(saved > 0 ? saved : USERS_PANEL_DEFAULT);
+  }
+  els.usersToggle.textContent = collapsed ? '«' : '»';
+  els.usersToggle.setAttribute('aria-expanded', String(!collapsed));
+  els.usersToggle.setAttribute(
+    'aria-label',
+    collapsed ? 'Развернуть участников' : 'Свернуть участников',
+  );
+  if (persist) localStorage.setItem(USERS_COLLAPSED_KEY, collapsed ? '1' : '0');
+  state.board?.layout?.();
+}
+
+function bindSidebarToggles() {
+  els.usersToggle?.addEventListener('click', () => {
+    setUsersCollapsed(!els.usersPanel.classList.contains('is-collapsed'));
+  });
+  setPagesCollapsed(localStorage.getItem(PAGES_COLLAPSED_KEY) === '1', { persist: false });
+  setUsersCollapsed(localStorage.getItem(USERS_COLLAPSED_KEY) === '1', { persist: false });
 }
 
 function bindWindowEvents() {
