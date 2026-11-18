@@ -471,6 +471,10 @@ textarea {
   color: #fff;
 }
 
+#invisible-toggle[aria-pressed='true'] {
+  opacity: 0.55;
+}
+
 .pages-panel,
 .users-panel {
   transition: width 120ms ease;

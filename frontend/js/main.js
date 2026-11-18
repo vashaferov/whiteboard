@@ -54,6 +54,7 @@ const state = {
   color: PALETTE[1],
   width: 4,
   tool: 'brush',
+  invisible: false,
   ready: false,
   textPoint: null,
   textEditObjectId: null,
@@ -186,6 +187,7 @@ function cacheElements() {
   els.usersPanel = $('#users-panel');
   els.usersResizer = $('#users-resizer');
   els.usersToggle = $('#users-toggle');
+  els.invisibleToggle = $('#invisible-toggle');
   els.pullActions = $('#pull-actions');
   els.pullSelected = $('#pull-selected');
   els.pullAll = $('#pull-all');
@@ -504,6 +506,18 @@ function lockedFor(object) {
   return Boolean(state.board?.getObjectData(object.frameId)?.locked);
 }
 
+function updateInvisibilityToggle() {
+  if (!els.invisibleToggle) return;
+  const admin = state.user?.role === 'admin';
+  els.invisibleToggle.hidden = !admin;
+  if (!admin) return;
+  const hidden = Boolean(state.invisible);
+  els.invisibleToggle.setAttribute('aria-pressed', String(hidden));
+  const label = hidden ? 'Показать меня ученикам' : 'Скрыть меня от учеников';
+  els.invisibleToggle.title = label;
+  els.invisibleToggle.setAttribute('aria-label', label);
+}
+
 function updateBoardSizeUI(presentation = isPresentation()) {
   const canResize = !presentation && isStaff(state.user?.role);
   els.boardSizeBtn.hidden = !canResize;
@@ -662,6 +676,7 @@ function updateToolbar() {
   els.imageBtn.disabled = false;
   updateFontControl();
   updateBoardSizeUI(presentation);
+  updateInvisibilityToggle();
 }
 
 // -------------------------------------------------------------------- image
@@ -1138,6 +1153,16 @@ function handleServerEvent(message) {
     case 'init':
       handleInit(message);
       break;
+    case 'users_state': {
+      state.users = new Map(message.users.map((user) => [user.id, user]));
+      if (typeof message.invisible === 'boolean') state.invisible = message.invisible;
+      for (const id of [...(state.board?.cursors.keys() ?? [])]) {
+        if (!state.users.has(id)) state.board?.removeCursor(id);
+      }
+      renderUsers();
+      updateInvisibilityToggle();
+      break;
+    }
     case 'user_joined':
       state.users.set(message.user.id, message.user);
       renderUsers();
@@ -1418,6 +1443,7 @@ function handleInit(message) {
     color: me?.color || '',
   };
   state.permissions = message.permissions;
+  state.invisible = Boolean(message.invisible);
   state.users = new Map(message.users.map((user) => [user.id, user]));
 
   state.workspaces = message.workspaces || [];
@@ -1438,6 +1464,7 @@ function handleInit(message) {
   renderPages();
   updateToolbar();
   applyWorkspaceMode();
+  updateInvisibilityToggle();
   setStatus('online', 'Подключено');
 
   els.usersHint.textContent =
@@ -1487,6 +1514,7 @@ function renderUsers() {
   for (const user of users) {
     const item = document.createElement('li');
     item.className = 'user';
+    item.dataset.role = user.role;
 
     if (canPull && user.role === 'student') {
       const check = document.createElement('input');
@@ -1517,6 +1545,13 @@ function renderUsers() {
       const badge = document.createElement('span');
       badge.className = 'badge';
       badge.textContent = user.role === 'admin' ? 'администратор' : 'учитель';
+      item.appendChild(badge);
+    }
+
+    if (isStaff(user.role) && user.invisible) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = 'невидимка';
       item.appendChild(badge);
     }
 
@@ -1774,6 +1809,11 @@ function setUsersCollapsed(collapsed, { persist = true } = {}) {
 function bindSidebarToggles() {
   els.usersToggle?.addEventListener('click', () => {
     setUsersCollapsed(!els.usersPanel.classList.contains('is-collapsed'));
+  });
+  els.invisibleToggle?.addEventListener('click', () => {
+    state.invisible = !state.invisible;
+    updateInvisibilityToggle();
+    sendWorkspace({ type: 'set_invisible', invisible: state.invisible });
   });
   setPagesCollapsed(localStorage.getItem(PAGES_COLLAPSED_KEY) === '1', { persist: false });
   setUsersCollapsed(localStorage.getItem(USERS_COLLAPSED_KEY) === '1', { persist: false });
