@@ -1636,19 +1636,22 @@ function bindUsersResizer() {
   let dragging = false;
   let startX = 0;
   let startWidth = USERS_PANEL_DEFAULT;
+  let currentWidth = USERS_PANEL_DEFAULT;
 
   const onMove = (event) => {
     if (!dragging) return;
-    applyUsersPanelWidth(startWidth + (startX - event.clientX));
+    currentWidth = clampUsersPanelWidth(startWidth + (startX - event.clientX));
+    applyUsersPanelWidth(currentWidth);
   };
   const stop = () => {
     if (!dragging) return;
     dragging = false;
     els.usersResizer.classList.remove('is-active');
+    els.usersPanel.classList.remove('is-resizing');
     document.removeEventListener('pointermove', onMove);
     document.removeEventListener('pointerup', stop);
     document.removeEventListener('pointercancel', stop);
-    applyUsersPanelWidth(els.usersPanel.getBoundingClientRect().width, { persist: true });
+    applyUsersPanelWidth(currentWidth, { persist: true });
   };
 
   els.usersResizer.addEventListener('pointerdown', (event) => {
@@ -1656,6 +1659,8 @@ function bindUsersResizer() {
     dragging = true;
     startX = event.clientX;
     startWidth = els.usersPanel.getBoundingClientRect().width;
+    currentWidth = startWidth;
+    els.usersPanel.classList.add('is-resizing');
     els.usersResizer.classList.add('is-active');
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', stop);

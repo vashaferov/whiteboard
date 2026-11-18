@@ -30,10 +30,18 @@ test('sidebar: a long participant name can be revealed by resizing', async ({ br
 
   const handle = await page.locator('#users-resizer').boundingBox();
   const y = handle.y + handle.height / 2;
-  await page.mouse.move(handle.x + handle.width / 2, y);
+  const startX = handle.x + handle.width / 2;
+  await page.mouse.move(startX, y);
   await page.mouse.down();
-  await page.mouse.move(handle.x - 220, y, { steps: 10 });
+  await page.mouse.move(startX - 220, y, { steps: 10 });
   await page.mouse.up();
+
+  const expectedWidth = await page.evaluate(
+    (target) => Math.min(560, Math.floor(window.innerWidth * 0.5), target),
+    before.width + 220,
+  );
+  const immediate = (await panel.boundingBox()).width;
+  expect(Math.abs(immediate - expectedWidth)).toBeLessThanOrEqual(1);
 
   await expect
     .poll(async () => (await panel.boundingBox()).width)
