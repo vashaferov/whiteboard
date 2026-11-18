@@ -33,6 +33,7 @@ from app.models.schemas import (
     StrokePoint,
     StrokeStart,
     TextAdd,
+    TextFont,
     TextUpdate,
     Undo,
     WorkspaceCreate,
@@ -466,6 +467,8 @@ async def _handle_message(
         await _handle_object_transform(manager, room, user, message)
     elif isinstance(message, TextUpdate):
         await _handle_text_update(manager, room, user, message)
+    elif isinstance(message, TextFont):
+        await _handle_text_font(manager, room, user, message)
     elif isinstance(message, ObjectDelete):
         await _handle_object_delete(manager, room, user, message)
     elif isinstance(message, ObjectLock):
@@ -862,6 +865,7 @@ async def _handle_text_add(
         y=message.y,
         color=message.color,
         fontSize=message.fontSize,
+        fontFamily=message.fontFamily,
     )
     _attach_to_frame(room, obj, user)
     manager.add_object(room, obj, user.workspace_id)
@@ -1054,6 +1058,39 @@ async def _handle_text_update(
             "type": "text_update",
             "id": user.id,
             "object": updated,
+            "workspaceId": user.workspace_id,
+        },
+        exclude=user.id,
+        workspace_id=user.workspace_id,
+    )
+
+
+async def _handle_text_font(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: TextFont,
+) -> None:
+    obj = await _check_object_workspace(manager, room, user, message)
+    if obj is None:
+        return
+    if obj.get("type") != "text":
+        await manager.send_to(user, _error("not_text", "Объект не является текстом"))
+        return
+    if _locked_for(user, room, obj):
+        await manager.send_to(user, _error("locked", "Объект заблокирован учителем"))
+        return
+    if not _can_edit_object(user, obj):
+        await manager.send_to(user, _error("forbidden", "Можно менять только свой текст"))
+        return
+    _push_fields(manager, room, user, [obj], ("fontFamily",))
+    manager.update_object_fields(room, message.objectId, fontFamily=message.fontFamily)
+    await manager.broadcast(
+        room,
+        {
+            "type": "text_font",
+            "objectId": message.objectId,
+            "fontFamily": message.fontFamily,
             "workspaceId": user.workspace_id,
         },
         exclude=user.id,

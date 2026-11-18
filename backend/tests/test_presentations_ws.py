@@ -136,6 +136,8 @@ def test_presentation_permissions(client: TestClient, login_user) -> None:
         assert "presentation_view_only" in codes(barrier(tw))
         tw.send_json({"type": "clear"})
         assert "presentation_view_only" in codes(barrier(tw))
+        tw.send_json({"type": "text_font", "objectId": "text-1", "fontFamily": "serif"})
+        assert "presentation_view_only" in codes(barrier(tw))
         sw.send_json({"type": "undo"})
         assert "presentation_view_only" in codes(barrier(sw))
 
