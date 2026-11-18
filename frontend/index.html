@@ -303,12 +303,25 @@
             <p><kbd>Del</kbd> удалить (учитель)</p>
           </div>
         </aside>
+
+        <div id="slide-controls" class="slide-controls" hidden>
+          <button id="slide-prev" class="slide-controls__button" type="button" aria-label="Предыдущий слайд">‹</button>
+          <span id="slide-counter" class="slide-controls__counter"></span>
+          <button id="slide-next" class="slide-controls__button" type="button" aria-label="Следующий слайд">›</button>
+        </div>
       </main>
 
       <input
         type="file"
         id="file-input"
         accept="image/png,image/jpeg,image/webp,image/gif"
+        hidden
+      />
+
+      <input
+        type="file"
+        id="presentation-input"
+        accept="application/pdf,.pdf"
         hidden
       />
 
