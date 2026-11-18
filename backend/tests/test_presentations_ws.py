@@ -136,11 +136,58 @@ def test_presentation_permissions(client: TestClient, login_user) -> None:
         assert "presentation_view_only" in codes(barrier(tw))
         tw.send_json({"type": "clear"})
         assert "presentation_view_only" in codes(barrier(tw))
-        tw.send_json({"type": "undo"})
-        assert "presentation_view_only" in codes(barrier(tw))
+        sw.send_json({"type": "undo"})
+        assert "presentation_view_only" in codes(barrier(sw))
 
         sw.send_json({"type": "workspace_switch", "workspaceId": "ws_default"})
         assert recv_until(sw, "workspace_state")["workspaceId"] == "ws_default"
+
+
+def test_presentation_undo_is_per_slide(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+    slides = upload_presentation(client, teacher["token"])
+
+    with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
+        tw.receive_json()
+        sw.receive_json()
+        barrier(tw)
+        workspace = create_presentation(tw, slides)
+        recv_until(sw, "workspace_created")
+        sw.send_json({"type": "workspace_switch", "workspaceId": workspace["id"]})
+        recv_until(sw, "workspace_state")
+
+        stroke_start(tw, "s0")
+        recv_until(sw, "stroke_start")
+        finish_stroke(tw, "s0")
+        recv_until(sw, "stroke_end")
+
+        tw.send_json({"type": "presentation_slide", "slideIndex": 1})
+        recv_until(sw, "presentation_slide")
+        recv_until(tw, "presentation_slide")
+        stroke_start(tw, "s1")
+        recv_until(sw, "stroke_start")
+        finish_stroke(tw, "s1")
+        recv_until(sw, "stroke_end")
+
+        tw.send_json({"type": "undo"})
+        assert recv_until(tw, "objects_restored")["removedIds"] == ["s1"]
+        assert recv_until(sw, "objects_restored")["removedIds"] == ["s1"]
+
+        tw.send_json({"type": "presentation_slide", "slideIndex": 0})
+        back = recv_until(sw, "presentation_slide")
+        assert [obj["id"] for obj in back["objects"]] == ["s0"]
+        recv_until(tw, "presentation_slide")
+
+        tw.send_json({"type": "undo"})
+        assert recv_until(tw, "objects_restored")["removedIds"] == ["s0"]
+        assert recv_until(sw, "objects_restored")["removedIds"] == ["s0"]
+
+        tw.send_json({"type": "undo"})
+        assert "undo_empty" in codes(barrier(tw))
+
+        sw.send_json({"type": "undo"})
+        assert "presentation_view_only" in codes(barrier(sw))
 
 
 def test_presentation_invalid_upload_url(client: TestClient, login_user) -> None:

@@ -606,11 +606,22 @@ class RoomManager:
         stack.append(entry)
         del stack[:-limit]
 
-    def pop_history(self, room: Room, user_id: str, workspace_id: str) -> dict[str, Any] | None:
+    def pop_history(
+        self,
+        room: Room,
+        user_id: str,
+        workspace_id: str,
+        slide_index: int | None = None,
+    ) -> dict[str, Any] | None:
         stack = room.history.get((user_id, workspace_id))
         if not stack:
             return None
-        return stack.pop()
+        if slide_index is None:
+            return stack.pop()
+        for index in range(len(stack) - 1, -1, -1):
+            if stack[index].get("slide") == slide_index:
+                return stack.pop(index)
+        return None
 
     def clear_history(
         self,

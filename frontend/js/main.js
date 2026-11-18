@@ -467,7 +467,8 @@ function updateLockButton() {
 }
 
 function requestUndo() {
-  if (!state.board || state.tools?.isDrawing() || isPresentation()) return;
+  if (!state.board || state.tools?.isDrawing()) return;
+  if (isPresentation() && !isStaff(state.user?.role)) return;
   sendWorkspace({ type: 'undo' });
 }
 
@@ -574,7 +575,7 @@ function updateToolbar() {
   els.clearBtn.hidden = presentation || !state.permissions.canClear;
   els.pdfBtn.hidden = presentation || !isStaff(state.user?.role);
   els.imageBtn.hidden = presentation;
-  els.undoBtn.hidden = presentation;
+  els.undoBtn.hidden = presentation && !isStaff(state.user?.role);
   els.imageBtn.disabled = false;
 }
 
@@ -775,7 +776,7 @@ function applyWorkspaceMode() {
   els.colors.hidden = presentation && !staff;
   els.widthControl.hidden = presentation && !staff;
   els.imageBtn.hidden = presentation;
-  els.undoBtn.hidden = presentation;
+  els.undoBtn.hidden = presentation && !staff;
   els.pdfBtn.hidden = presentation || !staff;
   els.clearBtn.hidden = presentation || !state.permissions.canClear;
   els.framePanel.hidden = true;
