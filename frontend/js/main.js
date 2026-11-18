@@ -117,6 +117,7 @@ function init() {
   bindUsersResizer();
   bindSidebarToggles();
   bindToolbar();
+  bindBoardSize();
   bindTextEditor();
   bindKeyboard();
   bindWindowEvents();
@@ -169,6 +170,11 @@ function cacheElements() {
   els.status = $('#status');
   els.roomTitle = $('#room-title');
   els.framePanel = $('#frame-panel');
+  els.boardSizeBtn = $('#board-size-btn');
+  els.boardSizePanel = $('#board-size-panel');
+  els.boardWidth = $('#board-width');
+  els.boardHeight = $('#board-height');
+  els.boardSizeApply = $('#board-size-apply');
   els.frameColors = $('#frame-colors');
   els.framePatternButtons = {
     none: $('#frame-pattern-none'),
@@ -392,6 +398,7 @@ function leaveRoom(message = '') {
   els.textEditor.hidden = true;
   els.textEditor.value = '';
   els.framePanel.hidden = true;
+  els.boardSizePanel.hidden = true;
   els.app.hidden = true;
   els.clearBtn.hidden = true;
   history.replaceState(null, '', '/');
@@ -495,6 +502,40 @@ function lockedFor(object) {
   if (object.locked) return true;
   if (!object.frameId) return false;
   return Boolean(state.board?.getObjectData(object.frameId)?.locked);
+}
+
+function updateBoardSizeUI(presentation = isPresentation()) {
+  const canResize = !presentation && isStaff(state.user?.role);
+  els.boardSizeBtn.hidden = !canResize;
+  if (!canResize) els.boardSizePanel.hidden = true;
+}
+
+function updateBoardSizePanel() {
+  if (!els.boardSizePanel || els.boardSizePanel.hidden || !state.board) return;
+  els.boardWidth.value = String(state.board.width);
+  els.boardHeight.value = String(state.board.height);
+}
+
+function bindBoardSize() {
+  if (!els.boardSizeBtn || !els.boardSizePanel) return;
+  els.boardSizeBtn.addEventListener('click', () => {
+    els.boardSizePanel.hidden = !els.boardSizePanel.hidden;
+    updateBoardSizePanel();
+  });
+  for (const preset of document.querySelectorAll('[data-board-preset]')) {
+    preset.addEventListener('click', () => {
+      const [width, height] = preset.dataset.boardPreset.split('x');
+      els.boardWidth.value = width;
+      els.boardHeight.value = height;
+    });
+  }
+  els.boardSizeApply.addEventListener('click', () => {
+    const width = Number(els.boardWidth.value);
+    const height = Number(els.boardHeight.value);
+    if (!Number.isInteger(width) || !Number.isInteger(height)) return;
+    sendWorkspace({ type: 'board_resize', width, height });
+    els.boardSizePanel.hidden = true;
+  });
 }
 
 function updateLockButton() {
@@ -620,6 +661,7 @@ function updateToolbar() {
   els.undoBtn.hidden = presentation && !isStaff(state.user?.role);
   els.imageBtn.disabled = false;
   updateFontControl();
+  updateBoardSizeUI(presentation);
 }
 
 // -------------------------------------------------------------------- image
@@ -824,6 +866,7 @@ function applyWorkspaceMode() {
   els.clearBtn.hidden = presentation || !state.permissions.canClear;
   els.framePanel.hidden = true;
   updateFontControl();
+  updateBoardSizeUI(presentation);
 
   if (presentation) {
     if (!wasPresentation) state.toolBeforePresentation = state.tool;
@@ -1103,6 +1146,10 @@ function handleServerEvent(message) {
       state.users.delete(message.id);
       board.removeCursor(message.id);
       renderUsers();
+      break;
+    case 'board_resize':
+      state.board?.setBoardSize(message.width, message.height);
+      updateBoardSizePanel();
       break;
     case 'stroke_start':
     case 'stroke_point':
