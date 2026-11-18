@@ -29,6 +29,7 @@ from app.models.schemas import (
     ObjectTransform,
     ObjectUpdate,
     PresentationSlide,
+    SetInvisible,
     ShapeAdd,
     StrokeEnd,
     StrokePoint,
@@ -53,6 +54,7 @@ from app.services.accounts import AccountStore
 from app.services.auth import SESSION_COOKIE, is_staff
 from app.services.room_manager import (
     BOARD_RATIO,
+    STAFF_ROLES,
     ConnectedUser,
     RateLimiter,
     Room,
@@ -339,7 +341,7 @@ async def websocket_endpoint(
             user.workspace_id = workspace
         else:
             user.workspace_id = room.workspace_ids()[0]
-        users = await manager.list_users(room)
+        users = await manager.list_users(room, viewer=user)
 
         await websocket.send_json(
             {
@@ -350,17 +352,24 @@ async def websocket_endpoint(
                 "users": users,
                 "objects": manager.objects_for(room, user.workspace_id),
                 "userCount": len(users),
+                "invisible": user.invisible,
                 "board": dict(room.board),
                 "permissions": permissions_for(user.role).model_dump(),
                 "workspaces": room.workspace_list(),
                 "workspaceId": user.workspace_id,
             }
         )
-        await manager.broadcast(
-            room,
-            {"type": "user_joined", "user": user.public()},
-            exclude=user.id,
-        )
+        await manager.publish_users_changed(room)
+        if user.invisible:
+            for other in list(room.users.values()):
+                if other.id != user.id and other.role in STAFF_ROLES:
+                    await manager.send_to(other, {"type": "user_joined", "user": user.public()})
+        else:
+            await manager.broadcast(
+                room,
+                {"type": "user_joined", "user": user.public()},
+                exclude=user.id,
+            )
         await _receive_loop(websocket, manager, room, user, settings)
     except WebSocketDisconnect:
         pass
@@ -403,6 +412,7 @@ async def _authenticate(
         color=account.color,
         websocket=websocket,
         limiter=_limiter(settings),
+        invisible=account.role == "admin",
     )
 
 
@@ -482,6 +492,8 @@ async def _handle_message(
         await _handle_object_lock(manager, room, user, message)
     elif isinstance(message, Undo):
         await _handle_undo(manager, room, user, message)
+    elif isinstance(message, SetInvisible):
+        await _handle_set_invisible(manager, room, user, message)
     elif isinstance(message, Cursor):
         await _handle_cursor(manager, room, user, message)
     elif isinstance(message, Clear):
@@ -764,9 +776,7 @@ async def _handle_frame_move(
         await manager.send_to(user, _error("invalid_message", "Объект не является фреймом"))
         return
     if _locked_for(room, obj) or any(
-        _locked_for(room, child)
-        for child in room.objects
-        if child.get("frameId") == obj["id"]
+        _locked_for(room, child) for child in room.objects if child.get("frameId") == obj["id"]
     ):
         await manager.send_to(user, _error("locked", "Элемент заблокирован учителем"))
         return
@@ -968,9 +978,7 @@ async def _handle_object_transform(
     if _locked_for(room, obj) or (
         obj.get("type") == "frame"
         and any(
-            _locked_for(room, child)
-            for child in room.objects
-            if child.get("frameId") == obj["id"]
+            _locked_for(room, child) for child in room.objects if child.get("frameId") == obj["id"]
         )
     ):
         await manager.send_to(user, _error("locked", "Элемент заблокирован учителем"))
@@ -1138,9 +1146,7 @@ async def _handle_object_delete(
         await manager.send_to(user, _error("locked", "Элемент заблокирован учителем"))
         return
     if obj.get("type") == "frame" and any(
-        _locked_for(room, child)
-        for child in room.objects
-        if child.get("frameId") == obj["id"]
+        _locked_for(room, child) for child in room.objects if child.get("frameId") == obj["id"]
     ):
         await manager.send_to(user, _error("locked", "Элемент заблокирован учителем"))
         return
@@ -1249,9 +1255,7 @@ def _undo_fields_apply(user: ConnectedUser, room: Room, entry: dict[str, Any]) -
         obj = room.get_object(object_id)
         if obj is None:
             continue
-        if _locked_for(room, obj) and not (
-            is_staff(user.role) and set(patch) <= {"locked"}
-        ):
+        if _locked_for(room, obj) and not (is_staff(user.role) and set(patch) <= {"locked"}):
             return False
         targets.append((obj, patch))
     if not targets:
@@ -1274,8 +1278,7 @@ def _undo_created_apply(user: ConnectedUser, room: Room, entry: dict[str, Any]) 
         if _locked_for(room, obj):
             return None
         if obj.get("type") == "frame" and any(
-            child.get("frameId") == obj["id"] and _locked_for(room, child)
-            for child in room.objects
+            child.get("frameId") == obj["id"] and _locked_for(room, child) for child in room.objects
         ):
             return None
         cascade = [] if obj.get("type") == "frame" else _deletion_cascade(room, obj)
@@ -1332,6 +1335,18 @@ async def _handle_object_lock(
     )
 
 
+async def _handle_set_invisible(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: SetInvisible,
+) -> None:
+    if user.role != "admin":
+        await manager.send_to(user, _error("forbidden", "Невидимость доступна администратору"))
+        return
+    await manager.set_invisible(room, user, message.invisible)
+
+
 async def _handle_cursor(
     manager: RoomManager,
     room: Room,
@@ -1339,6 +1354,8 @@ async def _handle_cursor(
     message: Cursor,
 ) -> None:
     if not await _check_workspace(manager, user, message):
+        return
+    if user.invisible:
         return
     await manager.broadcast(
         room,

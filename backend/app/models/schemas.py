@@ -323,6 +323,11 @@ class Undo(_Message):
     type: Literal["undo"]
 
 
+class SetInvisible(_Message):
+    type: Literal["set_invisible"]
+    invisible: bool
+
+
 class Cursor(_Message):
     type: Literal["cursor"]
     x: float = Field(ge=COORD_MIN, le=COORD_MAX)
@@ -449,6 +454,7 @@ ClientMessage = Annotated[
     | ObjectDelete
     | ObjectLock
     | Undo
+    | SetInvisible
     | PresentationSlide
     | Cursor
     | Clear

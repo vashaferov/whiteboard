@@ -748,9 +748,7 @@ async def test_board_size_is_shared(settings, tmp_path, redis_pair) -> None:
     room_b = await manager_b.get_or_create("room-board")
 
     assert manager_a.set_board(room_a, 1200, 800) is True
-    await manager_a.broadcast(
-        room_a, {"type": "board_resize", "width": 1200, "height": 800}
-    )
+    await manager_a.broadcast(room_a, {"type": "board_resize", "width": 1200, "height": 800})
     await wait_for(lambda: room_b.board == {"width": 1200, "height": 800})
 
     await manager_a.shutdown()
@@ -760,6 +758,35 @@ async def test_board_size_is_shared(settings, tmp_path, redis_pair) -> None:
     room_c = await manager_c.get_or_create("room-board")
     assert room_c.board == {"width": 1200, "height": 800}
     await manager_c.shutdown()
+
+
+async def test_hidden_admin_is_filtered_across_instances(settings, tmp_path, redis_pair) -> None:
+    first_redis, second_redis = redis_pair
+    settings = settings.model_copy(update={"presence_ttl_seconds": 10, "heartbeat_seconds": 100})
+    manager_a = make_manager(settings, tmp_path, "hidden-a", first_redis)
+    manager_b = make_manager(settings, tmp_path, "hidden-b", second_redis)
+    await manager_a.startup()
+    await manager_b.startup()
+
+    admin, _ = make_user("hidden-admin", "admin")
+    admin.invisible = True
+    teacher, _ = make_user("hidden-teacher", "teacher")
+    student, _ = make_user("hidden-student", "student")
+    room_a = await manager_a.join("room-hidden", admin)
+    await manager_a.join("room-hidden", teacher)
+    await manager_a.join("room-hidden", student)
+
+    assert "hidden-admin" not in {u["id"] for u in await manager_a.list_users(room_a, student)}
+    teacher_roster = await manager_a.list_users(room_a, teacher)
+    assert "hidden-admin" in {u["id"] for u in teacher_roster}
+    assert next(u for u in teacher_roster if u["id"] == "hidden-admin")["invisible"] is True
+
+    room_b = await manager_b.get_or_create("room-hidden")
+    assert "hidden-admin" not in {u["id"] for u in await manager_b.list_users(room_b, student)}
+    assert "hidden-admin" in {u["id"] for u in await manager_b.list_users(room_b, teacher)}
+
+    await manager_a.shutdown()
+    await manager_b.shutdown()
 
 
 async def test_objects_restored_is_shared(settings, tmp_path, redis_pair) -> None:

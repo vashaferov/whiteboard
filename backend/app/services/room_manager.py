@@ -45,6 +45,7 @@ ADD_EVENTS = {
     "frame_add",
 }
 OBJECT_EVENTS = {"object_transform", "text_update"}
+STAFF_ROLES = {"teacher", "admin"}
 
 # Events whose delivery is filtered by the recipient's current workspace. Room-level
 # structural events (workspace_* metadata, presence) are intentionally absent.
@@ -135,6 +136,7 @@ class ConnectedUser:
     strokes: dict[str, dict[str, Any]] = field(default_factory=dict)
     workspace_id: str = DEFAULT_WORKSPACE_ID
     state_version: int = 0
+    invisible: bool = False
     workspace_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     pending_move: PendingMove | None = None
 
@@ -147,9 +149,7 @@ class ConnectedUser:
         }
 
 
-def normalize_board(
-    board: dict[str, Any] | None, fallback: dict[str, int]
-) -> dict[str, int]:
+def normalize_board(board: dict[str, Any] | None, fallback: dict[str, int]) -> dict[str, int]:
     try:
         width = int(board["width"]) if board else fallback["width"]
         height = int(board["height"]) if board else fallback["height"]
@@ -390,10 +390,20 @@ class RoomManager:
         await self._remove_presence(room_id, user_id)
         await self._remove_users(room, [user_id], notify=notify)
 
-    async def list_users(self, room: Room) -> list[dict[str, str]]:
-        """Merge locally connected users with fresh Redis presence entries."""
+    async def list_users(
+        self, room: Room, viewer: ConnectedUser | None = None
+    ) -> list[dict[str, Any]]:
+        """Merge local and Redis users, hiding invisible admins from non-staff."""
 
-        users: dict[str, dict[str, str]] = {user.id: user.public() for user in room.users.values()}
+        viewer_staff = viewer is None or viewer.role in STAFF_ROLES
+        users: dict[str, dict[str, Any]] = {}
+        for user in room.users.values():
+            if user.invisible and not viewer_staff:
+                continue
+            entry: dict[str, Any] = user.public()
+            if viewer_staff:
+                entry["invisible"] = user.invisible
+            users[user.id] = entry
         if self._redis is None:
             return list(users.values())
         raw = await self._redis.hgetall(self._presence_key(room.id))
@@ -407,13 +417,50 @@ class RoomManager:
                 if now - float(payload["ts"]) > self.settings.presence_ttl_seconds:
                     stale.append(user_id)
                     continue
-                users[user_id] = payload["user"]
+                hidden = bool(payload.get("hidden"))
+                if hidden and not viewer_staff:
+                    continue
+                entry = dict(payload["user"])
+                if viewer_staff:
+                    entry["invisible"] = hidden
+                users[user_id] = entry
             except (KeyError, TypeError, ValueError):
                 stale.append(user_id)
         if stale:
             with suppress(Exception):
                 await self._redis.hdel(self._presence_key(room.id), *stale)
         return list(users.values())
+
+    async def broadcast_users_state(self, room: Room) -> None:
+        for user in list(room.users.values()):
+            users = await self.list_users(room, viewer=user)
+            await self.send_to(
+                user,
+                {
+                    "type": "users_state",
+                    "users": users,
+                    "userCount": len(users),
+                    "invisible": user.invisible,
+                },
+            )
+
+    async def publish_users_changed(self, room: Room) -> None:
+        if self._redis is not None:
+            with suppress(Exception):
+                await self._publish(room.id, {"event": {"type": "users_changed"}})
+
+    async def set_invisible(self, room: Room, user: ConnectedUser, invisible: bool) -> bool:
+        if user.invisible == invisible:
+            return False
+        user.invisible = invisible
+        if self._redis is not None:
+            with suppress(Exception):
+                await self._set_presence(room.id, user)
+        if invisible:
+            await self.broadcast(room, {"type": "cursor_remove", "id": user.id})
+        await self.broadcast_users_state(room)
+        await self.publish_users_changed(room)
+        return True
 
     async def kick(self, room_id: str, target_id: str, *, reason: str | None = None) -> bool:
         room = self.rooms.get(room_id)
@@ -538,7 +585,7 @@ class RoomManager:
             await self._remove_users(room, dead, notify=True)
 
     async def _remove_users(self, room: Room, user_ids: list[str], *, notify: bool) -> None:
-        removed: list[str] = []
+        removed: list[ConnectedUser] = []
         for user_id in user_ids:
             user = room.users.pop(user_id, None)
             if user is None:
@@ -548,15 +595,21 @@ class RoomManager:
                 user.pending_move = None
             await self._remove_presence(room.id, user_id)
             await self._finalize_strokes(room, user)
-            removed.append(user_id)
+            removed.append(user)
         room.touch()
         if notify and removed:
-            for user_id in removed:
-                message = {"type": "user_left", "id": user_id}
-                await self._send_local(room, message)
-                if self._redis is not None:
-                    with suppress(Exception):
-                        await self._publish(room.id, {"event": message})
+            for user in removed:
+                message = {"type": "user_left", "id": user.id}
+                if user.invisible:
+                    for other in list(room.users.values()):
+                        if other.role in STAFF_ROLES:
+                            await self.send_to(other, message)
+                    await self.publish_users_changed(room)
+                else:
+                    await self._send_local(room, message)
+                    if self._redis is not None:
+                        with suppress(Exception):
+                            await self._publish(room.id, {"event": message})
         if not room.users and self.rooms.get(room.id) is room:
             await self._persist_and_drop(room)
 
@@ -1099,6 +1152,9 @@ class RoomManager:
                 if event.get("type") == "remote_room_closed":
                     await self.close_room(room_id)
                     return
+                if event.get("type") == "users_changed":
+                    await self.broadcast_users_state(room)
+                    continue
                 await self._apply_remote_event(room, event)
                 scope = (
                     event.get("workspaceId")
@@ -1143,7 +1199,10 @@ class RoomManager:
             logger.exception("Presence heartbeat failed for room %s", room.id)
 
     def _presence_payload(self, user: ConnectedUser) -> str:
-        return json.dumps({"user": user.public(), "ts": time.time()}, ensure_ascii=False)
+        return json.dumps(
+            {"user": user.public(), "hidden": user.invisible, "ts": time.time()},
+            ensure_ascii=False,
+        )
 
     async def _set_presence(self, room_id: str, user: ConnectedUser) -> None:
         await self._redis.hset(self._presence_key(room_id), user.id, self._presence_payload(user))
