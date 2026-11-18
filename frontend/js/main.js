@@ -1,6 +1,6 @@
 /** Точка входа: вход в урок, связка доски, инструментов и WebSocket-клиента. */
 
-import { Board } from './board.js';
+import { Board, fontStack } from './board.js';
 import { ToolManager } from './tools.js';
 import { SyncClient } from './sync.js';
 import { PagesPanel } from './pages.js';
@@ -186,6 +186,8 @@ function cacheElements() {
   els.usersHint = $('#users-hint');
   els.toolButtons = Array.from(document.querySelectorAll('[data-tool]'));
   els.colors = $('#colors');
+  els.fontControl = $('#font-select')?.closest('.font-control');
+  els.fontSelect = $('#font-select');
   els.widthRange = $('#width-range');
   els.widthValue = $('#width-value');
   els.clearBtn = $('#clear-btn');
@@ -298,6 +300,7 @@ function startRoom({ room, user, permissions, board }) {
     onSelectObject: () => {
       updateFramePanel();
       updateLockButton();
+      updateFontControl();
     },
     onViewChange: (percent) => updateZoomControls(percent),
     onGestureStart: () => state.tools?.cancelOrFinishStroke(),
@@ -414,6 +417,20 @@ function bindToolbar() {
     state.tools?.setStyle({ width: state.width });
   });
 
+  els.fontSelect?.addEventListener('change', () => {
+    const fontFamily = els.fontSelect.value;
+    state.tools?.setFontFamily(fontFamily);
+    const id = state.board?.getSelectedId();
+    const object = id ? state.board.getObjectData(id) : null;
+    if (isPresentation() || !object || object.type !== 'text' || !canEditObject(object)) {
+      updateFontControl();
+      return;
+    }
+    state.board.setTextFont(id, fontFamily);
+    sendWorkspace({ type: 'text_font', objectId: id, fontFamily });
+    updateFontControl();
+  });
+
   els.clearBtn.addEventListener('click', () => {
     if (!state.permissions.canClear || !state.board) return;
     if (!window.confirm('Очистить доску для всех участников?')) return;
@@ -455,6 +472,21 @@ function canEditObject(object) {
     Boolean(state.user) &&
     (isStaff(state.user.role) || (!lockedFor(object) && object.author === state.user.id))
   );
+}
+
+function updateFontControl() {
+  if (!els.fontControl) return;
+  const presentation = isPresentation();
+  const id = state.board?.getSelectedId();
+  const object = id ? state.board.getObjectData(id) : null;
+  const selected = object?.type === 'text' && !presentation ? object : null;
+  const visible = Boolean(selected) || (!presentation && state.tool === 'text');
+  els.fontControl.hidden = !visible;
+  if (!visible) return;
+  els.fontSelect.value = selected
+    ? selected.fontFamily || 'sans'
+    : state.tools?.fontFamily || 'sans';
+  els.fontSelect.disabled = Boolean(selected) && !canEditObject(selected);
 }
 
 function lockedFor(object) {
@@ -563,6 +595,7 @@ function selectTool(tool) {
     button.classList.toggle('is-active', button.dataset.tool === tool);
   }
   state.tools?.setTool(tool);
+  updateFontControl();
 }
 
 function updateZoomControls(percent = 100) {
@@ -585,6 +618,7 @@ function updateToolbar() {
   els.imageBtn.hidden = presentation;
   els.undoBtn.hidden = presentation && !isStaff(state.user?.role);
   els.imageBtn.disabled = false;
+  updateFontControl();
 }
 
 // -------------------------------------------------------------------- image
@@ -788,6 +822,7 @@ function applyWorkspaceMode() {
   els.pdfBtn.hidden = presentation || !staff;
   els.clearBtn.hidden = presentation || !state.permissions.canClear;
   els.framePanel.hidden = true;
+  updateFontControl();
 
   if (presentation) {
     if (!wasPresentation) state.toolBeforePresentation = state.tool;
@@ -868,7 +903,7 @@ function openTextEditor(point) {
   const style = state.tools.getTextStyle();
   state.textEditObjectId = null;
   state.textPoint = point;
-  showTextEditorAt(point.x, point.y, style.fontSize, style.color, '');
+  showTextEditorAt(point.x, point.y, style.fontSize, style.color, '', style.fontFamily);
 }
 
 function openTextEditorForObject(object) {
@@ -886,10 +921,11 @@ function openTextEditorForObject(object) {
     object.fontSize || 24,
     object.color || state.color,
     object.content || '',
+    object.fontFamily || 'sans',
   );
 }
 
-function showTextEditorAt(x, y, fontSize, color, value) {
+function showTextEditorAt(x, y, fontSize, color, value, fontFamily = 'sans') {
   const local = state.board.toScreen({ x, y });
   const container = els.board.getBoundingClientRect();
   const scale = state.board.scale;
@@ -900,6 +936,7 @@ function showTextEditorAt(x, y, fontSize, color, value) {
   els.textEditor.style.top = `${container.top + local.y}px`;
   els.textEditor.style.width = `${Math.max(180, Math.min(420, 320 * scale))}px`;
   els.textEditor.style.fontSize = `${fontSize * scale}px`;
+  els.textEditor.style.fontFamily = fontStack(fontFamily);
   els.textEditor.style.color = color;
   els.textEditor.style.height = 'auto';
   requestAnimationFrame(() => {
@@ -936,6 +973,7 @@ function commitText() {
     y: round(point.y),
     color: style.color,
     fontSize: style.fontSize,
+    fontFamily: style.fontFamily,
     rotation: 0,
     author: state.user?.id ?? null,
   };
@@ -948,6 +986,7 @@ function commitText() {
     y: object.y,
     color: style.color,
     fontSize: style.fontSize,
+    fontFamily: style.fontFamily,
   });
 }
 
@@ -1078,6 +1117,7 @@ function handleServerEvent(message) {
     case 'object_update':
     case 'object_transform':
     case 'text_update':
+    case 'text_font':
     case 'object_delete':
     case 'object_lock':
     case 'objects_restored':
@@ -1179,6 +1219,10 @@ function applyObjectEvent(message) {
     case 'object_transform':
     case 'text_update':
       board.applyObjectTransform(message.object);
+      break;
+    case 'text_font':
+      board.setTextFont(message.objectId, message.fontFamily);
+      updateFontControl();
       break;
     case 'object_delete':
       board.removeObject(message.objectId);

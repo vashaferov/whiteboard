@@ -4,6 +4,16 @@
  */
 
 const FONT_FAMILY = 'Inter, "Segoe UI", Roboto, Arial, sans-serif';
+export const FONT_STACKS = {
+  sans: FONT_FAMILY,
+  serif: 'Georgia, "Times New Roman", serif',
+  mono: 'Consolas, "Courier New", monospace',
+  hand: '"Segoe Script", "Comic Sans MS", cursive',
+  narrow: '"Arial Narrow", "Liberation Sans Narrow", sans-serif',
+};
+export function fontStack(fontFamily) {
+  return FONT_STACKS[fontFamily] ?? FONT_STACKS.sans;
+}
 const MIN_SCALE = 0.1;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 4;
@@ -643,7 +653,7 @@ export class Board {
       text: object.content,
       fill: object.color,
       fontSize: object.fontSize,
-      fontFamily: FONT_FAMILY,
+      fontFamily: fontStack(object.fontFamily),
       lineHeight: 1.25,
       listening: true,
     });
@@ -989,6 +999,14 @@ export class Board {
     }
     this._applyTransform(entry, object);
     if (this.selectedId === object.id) this.transformer.forceUpdate();
+  }
+
+  setTextFont(objectId, fontFamily) {
+    const entry = this.objects.get(objectId);
+    if (!entry || entry.data.type !== 'text') return;
+    entry.data.fontFamily = fontFamily;
+    entry.node.findOne('Text')?.fontFamily(fontStack(fontFamily));
+    this.contentLayer.batchDraw();
   }
 
   applyObjectsRestored({ removedIds = [], objects = [] } = {}) {
