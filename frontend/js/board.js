@@ -5,6 +5,9 @@
 
 const FONT_FAMILY = 'Inter, "Segoe UI", Roboto, Arial, sans-serif';
 const MIN_SCALE = 0.1;
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 4;
+const PAN_KEEP_RATIO = 0.25;
 const FLOW_SHAPES = new Set(['process', 'decision', 'terminator']);
 const LOCK_BADGE = '🔒';
 const LOCK_BADGE_SIZE = 14;
@@ -127,10 +130,15 @@ export class Board {
     this.cursors = new Map();
     this.slideImage = null;
     this.slideToken = 0;
+    this.fitScale = 1;
+    this.zoom = 1;
+    this.panX = 0;
+    this.panY = 0;
+    this.onViewChange = options.onViewChange ?? (() => {});
 
-    this._onWindowResize = () => this.fit();
+    this._onWindowResize = () => this.layout();
     window.addEventListener('resize', this._onWindowResize);
-    this.resizeObserver = new ResizeObserver(() => this.fit());
+    this.resizeObserver = new ResizeObserver(() => this.layout());
     this.resizeObserver.observe(container);
 
     this.stage.on('pointerdown', (event) => this._handleStagePointerDown(event));
@@ -141,20 +149,101 @@ export class Board {
   // ------------------------------------------------------------------ viewport
 
   fit() {
+    this.resetView();
+  }
+
+  resetView() {
+    this.zoom = 1;
+    this.panX = 0;
+    this.panY = 0;
+    this.layout();
+  }
+
+  layout() {
     if (this.destroyed) return;
     const containerWidth = Math.max(1, this.container.clientWidth);
     const containerHeight = Math.max(1, this.container.clientHeight);
-    const scale = Math.max(
+    this.fitScale = Math.max(
       MIN_SCALE,
       Math.min(containerWidth / this.width, containerHeight / this.height),
     );
+    this._clampView(containerWidth, containerHeight);
+    this._applyView(containerWidth, containerHeight);
+  }
+
+  _applyView(containerWidth, containerHeight) {
+    const scale = this.fitScale * this.zoom;
     this.scale = scale;
-    this.offsetX = (containerWidth - this.width * scale) / 2;
-    this.offsetY = (containerHeight - this.height * scale) / 2;
+    this.offsetX = (containerWidth - this.width * scale) / 2 + this.panX;
+    this.offsetY = (containerHeight - this.height * scale) / 2 + this.panY;
     this.stage.size({ width: containerWidth, height: containerHeight });
     this.stage.scale({ x: scale, y: scale });
     this.stage.position({ x: this.offsetX, y: this.offsetY });
     this.stage.batchDraw();
+    this.onViewChange(this.getZoomPercent());
+  }
+
+  _clampView(containerWidth, containerHeight) {
+    if (this.zoom <= 1) {
+      this.panX = 0;
+      this.panY = 0;
+      return;
+    }
+    const scale = this.fitScale * this.zoom;
+    const boardWidth = this.width * scale;
+    const boardHeight = this.height * scale;
+    const baseX = (containerWidth - boardWidth) / 2;
+    const baseY = (containerHeight - boardHeight) / 2;
+    this.panX = clamp(
+      this.panX,
+      PAN_KEEP_RATIO * containerWidth - baseX - boardWidth,
+      (1 - PAN_KEEP_RATIO) * containerWidth - baseX,
+    );
+    this.panY = clamp(
+      this.panY,
+      PAN_KEEP_RATIO * containerHeight - baseY - boardHeight,
+      (1 - PAN_KEEP_RATIO) * containerHeight - baseY,
+    );
+  }
+
+  getZoomPercent() {
+    return Math.round(this.zoom * 100);
+  }
+
+  setZoom(zoom, anchor = null) {
+    const next = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+    if (next === this.zoom) return;
+    const containerWidth = Math.max(1, this.container.clientWidth);
+    const containerHeight = Math.max(1, this.container.clientHeight);
+    const world = anchor
+      ? {
+          x: (anchor.x - this.offsetX) / this.scale,
+          y: (anchor.y - this.offsetY) / this.scale,
+        }
+      : null;
+    this.zoom = next;
+    if (world) {
+      const scale = this.fitScale * next;
+      this.panX = anchor.x - world.x * scale - (containerWidth - this.width * scale) / 2;
+      this.panY =
+        anchor.y - world.y * scale - (containerHeight - this.height * scale) / 2;
+    }
+    this._clampView(containerWidth, containerHeight);
+    this._applyView(containerWidth, containerHeight);
+  }
+
+  zoomAt(factor, anchor = null) {
+    this.setZoom(this.zoom * factor, anchor);
+  }
+
+  panBy(dx, dy) {
+    if (this.zoom <= 1) return;
+    const containerWidth = Math.max(1, this.container.clientWidth);
+    const containerHeight = Math.max(1, this.container.clientHeight);
+    this.panX += dx;
+    this.panY += dy;
+    this._clampView(containerWidth, containerHeight);
+    this._applyView(containerWidth, containerHeight);
   }
 
   setBoardSize(width, height) {
@@ -263,7 +352,7 @@ export class Board {
       stage.size({ width: saved.width, height: saved.height });
       stage.scale({ x: saved.scaleX, y: saved.scaleY });
       stage.position({ x: saved.x, y: saved.y });
-      this.fit();
+      stage.draw();
     }
   }
 
