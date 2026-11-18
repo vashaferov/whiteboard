@@ -14,6 +14,7 @@ from app.config import Settings
 from app.models.schemas import (
     OBJECT_ID_PATTERN,
     ROOM_ID_PATTERN,
+    BoardResize,
     Clear,
     ClientMessage,
     ConnectorAdd,
@@ -50,7 +51,13 @@ from app.services import metrics
 from app.services.access import can_access_room
 from app.services.accounts import AccountStore
 from app.services.auth import SESSION_COOKIE, is_staff
-from app.services.room_manager import ConnectedUser, RateLimiter, Room, RoomManager
+from app.services.room_manager import (
+    BOARD_RATIO,
+    ConnectedUser,
+    RateLimiter,
+    Room,
+    RoomManager,
+)
 from app.services.workspaces import PRESENTATION_KIND
 
 logger = logging.getLogger(__name__)
@@ -343,7 +350,7 @@ async def websocket_endpoint(
                 "users": users,
                 "objects": manager.objects_for(room, user.workspace_id),
                 "userCount": len(users),
-                "board": {"width": settings.board_width, "height": settings.board_height},
+                "board": dict(room.board),
                 "permissions": permissions_for(user.role).model_dump(),
                 "workspaces": room.workspace_list(),
                 "workspaceId": user.workspace_id,
@@ -467,6 +474,8 @@ async def _handle_message(
         await _handle_text_update(manager, room, user, message)
     elif isinstance(message, TextFont):
         await _handle_text_font(manager, room, user, message)
+    elif isinstance(message, BoardResize):
+        await _handle_board_resize(manager, room, user, message)
     elif isinstance(message, ObjectDelete):
         await _handle_object_delete(manager, room, user, message)
     elif isinstance(message, ObjectLock):
@@ -1093,6 +1102,26 @@ async def _handle_text_font(
         },
         exclude=user.id,
         workspace_id=user.workspace_id,
+    )
+
+
+async def _handle_board_resize(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: BoardResize,
+) -> None:
+    if not is_staff(user.role):
+        await manager.send_to(user, _error("forbidden", "Менять размер может только учитель"))
+        return
+    if max(message.width / message.height, message.height / message.width) > BOARD_RATIO:
+        await manager.send_to(user, _error("invalid_message", "Слишком вытянутый холст"))
+        return
+    if not manager.set_board(room, message.width, message.height):
+        return
+    await manager.broadcast(
+        room,
+        {"type": "board_resize", "width": message.width, "height": message.height},
     )
 
 

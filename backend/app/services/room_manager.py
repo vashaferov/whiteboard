@@ -32,6 +32,10 @@ from app.services.workspaces import (
 
 logger = logging.getLogger(__name__)
 
+BOARD_MIN = 640
+BOARD_MAX = 4000
+BOARD_RATIO = 4
+
 ADD_EVENTS = {
     "shape_add",
     "text_add",
@@ -143,6 +147,21 @@ class ConnectedUser:
         }
 
 
+def normalize_board(
+    board: dict[str, Any] | None, fallback: dict[str, int]
+) -> dict[str, int]:
+    try:
+        width = int(board["width"]) if board else fallback["width"]
+        height = int(board["height"]) if board else fallback["height"]
+    except (KeyError, TypeError, ValueError):
+        return dict(fallback)
+    if not (BOARD_MIN <= width <= BOARD_MAX and BOARD_MIN <= height <= BOARD_MAX):
+        return dict(fallback)
+    if max(width / height, height / width) > BOARD_RATIO:
+        return dict(fallback)
+    return {"width": width, "height": height}
+
+
 class Room:
     """A single lesson room with connected users and finished objects."""
 
@@ -152,9 +171,11 @@ class Room:
         objects: list[dict[str, Any]] | None = None,
         seq: int = 0,
         workspaces: list[dict[str, Any]] | None = None,
+        board: dict[str, Any] | None = None,
     ) -> None:
         self.id = room_id
         self.users: dict[str, ConnectedUser] = {}
+        self.board = normalize_board(board, {"width": 1600, "height": 900})
         self.objects: list[dict[str, Any]] = list(objects or [])
         self.index: dict[str, dict[str, Any]] = {
             str(obj["id"]): obj for obj in self.objects if isinstance(obj, dict) and "id" in obj
@@ -322,8 +343,13 @@ class RoomManager:
             if room is not None:
                 return room
             snapshot = await self.store.load(room_id)
-            room = Room(room_id)
+            fallback = {
+                "width": self.settings.board_width,
+                "height": self.settings.board_height,
+            }
+            room = Room(room_id, board=fallback)
             if snapshot is not None:
+                room.board = normalize_board(snapshot.board, fallback)
                 restored = [
                     obj
                     for obj in snapshot.objects
@@ -461,6 +487,7 @@ class RoomManager:
             self._workspaces_key(room_id),
             self._seq_key(room_id),
             self._presence_key(room_id),
+            self._board_key(room_id),
         ]
         with suppress(Exception):
             await self._redis.delete(*keys)
@@ -709,6 +736,14 @@ class RoomManager:
         self.mark_dirty(room)
         return True
 
+    def set_board(self, room: Room, width: int, height: int) -> bool:
+        board = {"width": int(width), "height": int(height)}
+        if board == room.board:
+            return False
+        room.board = board
+        self.mark_dirty(room)
+        return True
+
     async def switch_workspace(
         self,
         room: Room,
@@ -877,7 +912,7 @@ class RoomManager:
         seq = room.seq
         workspaces = room.workspace_list()
         try:
-            await self.store.save(room.id, objects, seq, workspaces)
+            await self.store.save(room.id, objects, seq, workspaces, board=room.board)
         except Exception:  # noqa: BLE001 - persistence must not crash the room
             logger.exception("Failed to save snapshot for room %s", room.id)
             room.dirty = True
@@ -929,6 +964,9 @@ class RoomManager:
     def _presence_key(self, room_id: str) -> str:
         return self._key(room_id, "presence")
 
+    def _board_key(self, room_id: str) -> str:
+        return self._key(room_id, "board")
+
     async def _restore_redis_state(self, room: Room) -> bool:
         """Restore room state from Redis when it is authoritative.
 
@@ -941,8 +979,20 @@ class RoomManager:
         raw_workspaces = await self._redis.hgetall(self._workspaces_key(room.id))
         raw_objects = await self._redis.hgetall(self._objects_key(room.id))
         seq = await self._redis.get(self._seq_key(room.id))
-        if not raw_workspaces and not raw_objects and seq is None:
+        raw_board = await self._redis.get(self._board_key(room.id))
+        if not raw_workspaces and not raw_objects and seq is None and raw_board is None:
             return False
+
+        if raw_board is not None:
+            try:
+                board = json.loads(raw_board)
+            except (TypeError, ValueError):
+                board = None
+            fallback = {
+                "width": self.settings.board_width,
+                "height": self.settings.board_height,
+            }
+            room.board = normalize_board(board if isinstance(board, dict) else None, fallback)
 
         workspaces: list[dict[str, Any]] = []
         for value in raw_workspaces.values():
@@ -976,7 +1026,11 @@ class RoomManager:
         """Write the room's workspaces, objects and seq to Redis in one startup path."""
         await self._write_workspaces(room)
         await self._write_objects(room)
+        await self._write_board(room)
         await self._redis.set(self._seq_key(room.id), room.seq)
+
+    async def _write_board(self, room: Room) -> None:
+        await self._redis.set(self._board_key(room.id), json.dumps(room.board))
 
     async def _write_workspaces(self, room: Room) -> None:
         mapping = {
@@ -1200,6 +1254,8 @@ class RoomManager:
             else:
                 await self._redis.delete(objects_key)
             await self._redis.set(self._seq_key(room.id), room.seq)
+        elif kind == "board_resize":
+            await self._write_board(room)
         elif kind == "presentation_slide" or kind in (
             "workspace_created",
             "workspace_renamed",
@@ -1303,6 +1359,18 @@ class RoomManager:
             else:
                 room.clear()
             changed = True
+        elif kind == "board_resize":
+            width = message.get("width")
+            height = message.get("height")
+            if isinstance(width, int) and isinstance(height, int):
+                room.board = normalize_board(
+                    {"width": width, "height": height},
+                    {
+                        "width": self.settings.board_width,
+                        "height": self.settings.board_height,
+                    },
+                )
+                changed = True
         elif kind == "presentation_slide":
             workspace_id = message.get("workspaceId")
             workspace = room.workspaces.get(workspace_id) if isinstance(workspace_id, str) else None
