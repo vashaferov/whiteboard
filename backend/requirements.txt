@@ -8,3 +8,6 @@ boto3>=1.35,<2.0
 redis>=5.0,<7.0
 prometheus-client>=0.21,<1.0
 sentry-sdk[fastapi]>=2.18,<3.0
+
+pypdfium2>=4.30,<5.0
+Pillow>=10,<13.0

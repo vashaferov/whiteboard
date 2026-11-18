@@ -23,6 +23,7 @@ from app.services.images import ImageStorage, LocalImageStorage
 from app.services.storage import SnapshotStore
 from app.services.workspaces import (
     DEFAULT_WORKSPACE_ID,
+    PRESENTATION_KIND,
     assign_orphan_objects,
     new_workspace_id,
     next_workspace_name,
@@ -61,6 +62,7 @@ WORKSPACE_SCOPED_EVENTS = {
     "object_delete",
     "object_lock",
     "objects_restored",
+    "presentation_slide",
     "clear",
     "cursor",
     "cursor_remove",
@@ -208,11 +210,26 @@ class Room:
     def get_workspace(self, workspace_id: str) -> dict[str, Any] | None:
         return self.workspaces.get(workspace_id)
 
-    def add_workspace(self, name: str) -> dict[str, Any]:
+    def add_workspace(
+        self,
+        name: str,
+        kind: str = "page",
+        slides: list[str] | None = None,
+    ) -> dict[str, Any]:
         position = (
             max((workspace["position"] for workspace in self.workspaces.values()), default=-1) + 1
         )
-        workspace = {"id": new_workspace_id(), "name": name, "position": position}
+        workspace: dict[str, Any] = {
+            "id": new_workspace_id(),
+            "name": name,
+            "position": position,
+        }
+        if kind == PRESENTATION_KIND:
+            workspace.update(
+                kind=PRESENTATION_KIND,
+                slides=list(slides or []),
+                slideIndex=0,
+            )
         self.workspaces[workspace["id"]] = workspace
         return workspace
 
@@ -615,13 +632,42 @@ class RoomManager:
         room.clear_workspace(workspace_id)
         self.mark_dirty(room)
 
-    def objects_for(self, room: Room, workspace_id: str) -> list[dict[str, Any]]:
-        return room.objects_in(workspace_id)
+    async def finalize_user_strokes(self, room: Room, user: ConnectedUser) -> None:
+        await self._finalize_strokes(room, user)
 
-    def create_workspace(self, room: Room, name: str | None = None) -> dict[str, Any]:
+    def objects_for(self, room: Room, workspace_id: str) -> list[dict[str, Any]]:
+        objects = room.objects_in(workspace_id)
+        workspace = room.get_workspace(workspace_id)
+        if workspace is not None and workspace.get("kind") == PRESENTATION_KIND:
+            slide = int(workspace.get("slideIndex", 0) or 0)
+            return [obj for obj in objects if int(obj.get("slide", 0) or 0) == slide]
+        return objects
+
+    def _workspace_state_payload(
+        self, room: Room, user: ConnectedUser, workspace_id: str
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "type": "workspace_state",
+            "workspaceId": workspace_id,
+            "objects": self.objects_for(room, workspace_id),
+            "stateVersion": user.state_version,
+        }
+        workspace = room.get_workspace(workspace_id)
+        if workspace is not None and workspace.get("kind") == PRESENTATION_KIND:
+            payload["slideIndex"] = int(workspace.get("slideIndex", 0) or 0)
+        return payload
+
+    def create_workspace(
+        self,
+        room: Room,
+        name: str | None = None,
+        *,
+        kind: str = "page",
+        slides: list[str] | None = None,
+    ) -> dict[str, Any]:
         if name is None:
             name = next_workspace_name(room.workspace_list())
-        workspace = room.add_workspace(name)
+        workspace = room.add_workspace(name, kind=kind, slides=slides)
         self.mark_dirty(room)
         return workspace
 
@@ -670,12 +716,7 @@ class RoomManager:
                 user.state_version += 1
                 await self.send_to(
                     user,
-                    {
-                        "type": "workspace_state",
-                        "workspaceId": workspace_id,
-                        "objects": self.objects_for(room, workspace_id),
-                        "stateVersion": user.state_version,
-                    },
+                    self._workspace_state_payload(room, user, workspace_id),
                 )
                 return True
             await self.broadcast(
@@ -699,12 +740,7 @@ class RoomManager:
                 )
             await self.send_to(
                 user,
-                {
-                    "type": "workspace_state",
-                    "workspaceId": workspace_id,
-                    "objects": self.objects_for(room, workspace_id),
-                    "stateVersion": user.state_version,
-                },
+                self._workspace_state_payload(room, user, workspace_id),
             )
         return True
 
@@ -1154,7 +1190,11 @@ class RoomManager:
             else:
                 await self._redis.delete(objects_key)
             await self._redis.set(self._seq_key(room.id), room.seq)
-        elif kind in ("workspace_created", "workspace_renamed", "workspace_reordered"):
+        elif kind == "presentation_slide" or kind in (
+            "workspace_created",
+            "workspace_renamed",
+            "workspace_reordered",
+        ):
             await self._write_workspaces(room)
         elif kind == "workspace_deleted":
             deleted = message.get("workspaceId")
@@ -1253,6 +1293,19 @@ class RoomManager:
             else:
                 room.clear()
             changed = True
+        elif kind == "presentation_slide":
+            workspace_id = message.get("workspaceId")
+            workspace = room.workspaces.get(workspace_id) if isinstance(workspace_id, str) else None
+            slide = message.get("slideIndex")
+            if (
+                workspace is not None
+                and workspace.get("kind") == PRESENTATION_KIND
+                and isinstance(slide, int)
+                and not isinstance(slide, bool)
+            ):
+                slides = workspace.get("slides") or []
+                workspace["slideIndex"] = min(max(slide, 0), max(len(slides) - 1, 0))
+                changed = True
         elif kind == "workspace_created":
             workspace = message.get("workspace")
             if isinstance(workspace, dict) and isinstance(workspace.get("id"), str):

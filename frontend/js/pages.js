@@ -5,10 +5,11 @@
  */
 
 export class PagesPanel {
-  constructor({ container, onSelect, onCreate, onRename, onDelete, onMove }) {
+  constructor({ container, onSelect, onCreate, onCreatePresentation, onRename, onDelete, onMove }) {
     this.container = container;
     this.onSelect = onSelect;
     this.onCreate = onCreate;
+    this.onCreatePresentation = onCreatePresentation;
     this.onRename = onRename;
     this.onDelete = onDelete;
     this.onMove = onMove;
@@ -26,6 +27,9 @@ export class PagesPanel {
     header.appendChild(title);
 
     if (canManage) {
+      const adds = document.createElement('div');
+      adds.className = 'pages-panel__adds';
+
       const add = document.createElement('button');
       add.type = 'button';
       add.id = 'page-add';
@@ -33,7 +37,19 @@ export class PagesPanel {
       add.textContent = '+ Страница';
       add.disabled = busy;
       add.addEventListener('click', () => this.onCreate?.());
-      header.appendChild(add);
+      adds.appendChild(add);
+
+      const addPresentation = document.createElement('button');
+      addPresentation.type = 'button';
+      addPresentation.id = 'page-presentation';
+      addPresentation.className = 'btn btn--ghost pages-panel__add';
+      addPresentation.textContent = '+ Презентация';
+      addPresentation.title = 'Загрузить PDF-презентацию';
+      addPresentation.disabled = busy;
+      addPresentation.addEventListener('click', () => this.onCreatePresentation?.());
+      adds.appendChild(addPresentation);
+
+      header.appendChild(adds);
     }
 
     this.container.appendChild(header);
@@ -57,6 +73,14 @@ export class PagesPanel {
       const name = document.createElement('span');
       name.className = 'page__name';
       name.textContent = workspace.name;
+      if (workspace.kind === 'presentation') {
+        item.classList.add('page--presentation');
+        const kind = document.createElement('span');
+        kind.className = 'page__kind';
+        kind.textContent = 'PDF';
+        kind.title = 'Презентация';
+        select.appendChild(kind);
+      }
       select.appendChild(name);
 
       item.appendChild(select);

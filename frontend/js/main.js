@@ -63,6 +63,8 @@ const state = {
   selectedStudentIds: new Set(),
   moveRequestId: null,
   boardSize: DEFAULT_BOARD,
+  wasPresentation: false,
+  toolBeforePresentation: null,
 };
 
 const els = {};
@@ -187,6 +189,12 @@ function cacheElements() {
   els.lockBtn = $('#lock-btn');
   els.leaveBtn = $('#leave-btn');
   els.fileInput = $('#file-input');
+  els.presentationInput = $('#presentation-input');
+  els.slideControls = $('#slide-controls');
+  els.slidePrev = $('#slide-prev');
+  els.slideNext = $('#slide-next');
+  els.slideCounter = $('#slide-counter');
+  els.widthControl = els.widthRange.closest('.width-control');
   els.textEditor = $('#text-editor');
   els.toast = $('#toast');
 }
@@ -230,6 +238,8 @@ function startRoom({ room, user, permissions, board }) {
   state.stateVersion = 0;
   state.selectedStudentIds = new Set();
   state.moveRequestId = null;
+  state.wasPresentation = false;
+  state.toolBeforePresentation = null;
 
   $('#auth').hidden = true;
   $('#status-screen').hidden = true;
@@ -296,6 +306,7 @@ function startRoom({ room, user, permissions, board }) {
     container: els.pagesPanel,
     onSelect: (id) => requestWorkspaceSwitch(id),
     onCreate: () => requestWorkspaceCreate(),
+    onCreatePresentation: () => els.presentationInput.click(),
     onRename: (workspace) => requestWorkspaceRename(workspace),
     onDelete: (workspace) => requestWorkspaceDelete(workspace),
     onMove: (id, direction) => requestWorkspaceMove(id, direction),
@@ -352,6 +363,8 @@ function leaveRoom(message = '') {
   state.stateVersion = 0;
   state.selectedStudentIds = new Set();
   state.moveRequestId = null;
+  state.wasPresentation = false;
+  state.toolBeforePresentation = null;
   state.roomId = null;
   pagesPanel = null;
   els.pagesPanel.replaceChildren();
@@ -395,6 +408,9 @@ function bindToolbar() {
 
   els.imageBtn.addEventListener('click', () => els.fileInput.click());
   els.fileInput.addEventListener('change', uploadImage);
+  els.presentationInput.addEventListener('change', uploadPresentation);
+  els.slidePrev.addEventListener('click', () => requestSlide(-1));
+  els.slideNext.addEventListener('click', () => requestSlide(1));
   els.pdfBtn.addEventListener('click', exportPdf);
   els.undoBtn.addEventListener('click', requestUndo);
   els.leaveBtn.addEventListener('click', () => leaveRoom('Вы вышли из комнаты'));
@@ -434,14 +450,14 @@ function updateLockButton() {
   const id = state.board?.getSelectedId();
   const object = id ? state.board.getObjectData(id) : null;
   const staff = isStaff(state.user?.role);
-  els.lockBtn.hidden = !staff || !object;
+  els.lockBtn.hidden = isPresentation() || !staff || !object;
   if (!object) return;
   els.lockBtn.classList.toggle('is-active', Boolean(object.locked));
   els.lockBtn.title = object.locked ? 'Снять блокировку' : 'Заблокировать';
 }
 
 function requestUndo() {
-  if (!state.board || state.tools?.isDrawing()) return;
+  if (!state.board || state.tools?.isDrawing() || isPresentation()) return;
   sendWorkspace({ type: 'undo' });
 }
 
@@ -522,6 +538,7 @@ function updatePalette() {
 
 function selectTool(tool) {
   if (!tool) return;
+  if (isPresentation() && !(isStaff(state.user?.role) && tool === 'brush')) return;
   state.tool = tool;
   for (const button of els.toolButtons) {
     button.classList.toggle('is-active', button.dataset.tool === tool);
@@ -530,8 +547,11 @@ function selectTool(tool) {
 }
 
 function updateToolbar() {
-  els.clearBtn.hidden = !state.permissions.canClear;
-  els.pdfBtn.hidden = !isStaff(state.user?.role);
+  const presentation = isPresentation();
+  els.clearBtn.hidden = presentation || !state.permissions.canClear;
+  els.pdfBtn.hidden = presentation || !isStaff(state.user?.role);
+  els.imageBtn.hidden = presentation;
+  els.undoBtn.hidden = presentation;
   els.imageBtn.disabled = false;
 }
 
@@ -615,7 +635,7 @@ async function uploadImage(event) {
 }
 
 async function handlePaste(event) {
-  if (!state.board || !state.ready || !els.textEditor.hidden) return;
+  if (!state.board || !state.ready || !els.textEditor.hidden || isPresentation()) return;
   const target = event.target;
   if (
     target &&
@@ -643,8 +663,131 @@ async function handlePaste(event) {
   if (lastId) selectTool('select');
 }
 
+async function uploadPresentation(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file || !state.board || !isStaff(state.user?.role)) return;
+
+  const name = file.name.replace(/\.pdf$/i, '').trim().slice(0, 60) || 'Презентация';
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const response = await fetch('/api/presentations', { method: 'POST', body: form });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = data.detail;
+      toast(typeof detail === 'string' ? detail : detail?.message || 'Не удалось загрузить презентацию');
+      return;
+    }
+    sendWorkspace({
+      type: 'workspace_create',
+      name,
+      kind: 'presentation',
+      slides: data.slides,
+    });
+  } catch {
+    toast('Не удалось загрузить презентацию');
+  }
+}
+
+function presentationWorkspace() {
+  return (
+    state.workspaces.find(
+      (workspace) => workspace.id === state.workspaceId && workspace.kind === 'presentation',
+    ) || null
+  );
+}
+
+function isPresentation() {
+  return Boolean(presentationWorkspace());
+}
+
+function presentationSlideUrl(workspace = presentationWorkspace()) {
+  if (!workspace) return null;
+  const slides = workspace.slides || [];
+  const index = Math.min(Math.max(Number(workspace.slideIndex) || 0, 0), slides.length - 1);
+  return slides[index] ?? null;
+}
+
+function updateSlideControls() {
+  const workspace = presentationWorkspace();
+  if (!workspace) {
+    els.slideControls.hidden = true;
+    return;
+  }
+  const slides = workspace.slides || [];
+  const index = Math.min(Math.max(Number(workspace.slideIndex) || 0, 0), Math.max(slides.length - 1, 0));
+  const staff = isStaff(state.user?.role);
+  els.slideControls.hidden = false;
+  els.slideCounter.textContent = slides.length ? `${index + 1} / ${slides.length}` : '0 / 0';
+  els.slidePrev.hidden = !staff;
+  els.slideNext.hidden = !staff;
+  els.slidePrev.disabled = !staff || index <= 0;
+  els.slideNext.disabled = !staff || index >= slides.length - 1;
+}
+
+function requestSlide(direction) {
+  const workspace = presentationWorkspace();
+  if (!workspace || !isStaff(state.user?.role)) return;
+  const slides = workspace.slides || [];
+  const index = Math.min(
+    Math.max((Number(workspace.slideIndex) || 0) + direction, 0),
+    slides.length - 1,
+  );
+  if (index === workspace.slideIndex) return;
+  sendWorkspace({ type: 'presentation_slide', slideIndex: index });
+}
+
+function applyWorkspaceMode() {
+  if (!state.board) return;
+  const workspace = presentationWorkspace();
+  const presentation = Boolean(workspace);
+  const staff = isStaff(state.user?.role);
+  const wasPresentation = Boolean(state.wasPresentation);
+  state.wasPresentation = presentation;
+
+  for (const button of els.toolButtons) {
+    button.hidden = presentation && (!staff || button.dataset.tool !== 'brush');
+  }
+  els.colors.hidden = presentation && !staff;
+  els.widthControl.hidden = presentation && !staff;
+  els.imageBtn.hidden = presentation;
+  els.undoBtn.hidden = presentation;
+  els.pdfBtn.hidden = presentation || !staff;
+  els.clearBtn.hidden = presentation || !state.permissions.canClear;
+  els.framePanel.hidden = true;
+
+  if (presentation) {
+    if (!wasPresentation) state.toolBeforePresentation = state.tool;
+    state.board.setSelectMode(false);
+    state.board.selectObject(null);
+    closeTextEditor();
+    if (staff) {
+      state.board.setInteractive(true);
+      selectTool('brush');
+    } else {
+      state.tools?.setTool('select');
+      state.board.setInteractive(false);
+    }
+    updateSlideControls();
+    state.board
+      .setPresentationSlide(presentationSlideUrl(workspace))
+      .catch(() => toast('Не удалось открыть слайд'));
+  } else {
+    state.board.setInteractive(state.ready);
+    state.board.clearPresentationSlide();
+    updateSlideControls();
+    if (wasPresentation) {
+      const restore = state.toolBeforePresentation || 'brush';
+      state.toolBeforePresentation = null;
+      selectTool(restore);
+    }
+  }
+  updateLockButton();
+}
+
 async function exportPdf() {
-  if (!state.board || !isStaff(state.user?.role)) return;
+  if (!state.board || !isStaff(state.user?.role) || isPresentation()) return;
   if (state.tools?.isDrawing()) return;
   if (state.board.objects.size === 0) {
     toast('На странице нет объектов');
@@ -912,6 +1055,9 @@ function handleServerEvent(message) {
     case 'cursor_remove':
       board.removeCursor(message.id);
       break;
+    case 'presentation_slide':
+      handlePresentationSlide(message);
+      break;
     case 'workspace_state':
       handleWorkspaceState(message);
       break;
@@ -1014,6 +1160,9 @@ function applyObjectEvent(message) {
       updateFramePanel();
       updateLockButton();
       break;
+    case 'presentation_slide':
+      handlePresentationSlide(message);
+      break;
     case 'clear':
       board.clearObjects();
       toast('Учитель очистил доску');
@@ -1031,6 +1180,20 @@ function applyObjectEvent(message) {
   }
 }
 
+function handlePresentationSlide(message) {
+  const workspace = state.workspaces.find((item) => item.id === message.workspaceId);
+  if (!workspace) return;
+  workspace.slideIndex = message.slideIndex;
+  if (workspace.id !== state.workspaceId) return;
+
+  state.board?.setObjects(message.objects || []);
+  state.board?.selectObject(null);
+  state.board
+    ?.setPresentationSlide(presentationSlideUrl(workspace))
+    .catch(() => toast('Не удалось открыть слайд'));
+  updateSlideControls();
+}
+
 function handleWorkspaceState(message) {
   const version = message.stateVersion ?? 0;
   if (version <= state.stateVersion) return;
@@ -1044,12 +1207,16 @@ function handleWorkspaceState(message) {
   state.board.setObjects(message.objects || []);
   state.board.clearCursors();
   state.board.selectObject(null);
-  state.board.setInteractive(true);
+  const workspace = state.workspaces.find((item) => item.id === message.workspaceId);
+  if (workspace && typeof message.slideIndex === 'number') {
+    workspace.slideIndex = message.slideIndex;
+  }
 
   const buffered = state.pendingEvents;
   state.pendingEvents = [];
   for (const event of buffered) applyObjectEvent(event);
 
+  applyWorkspaceMode();
   renderPages();
   renderUsers();
   persistSessionWorkspace();
@@ -1140,12 +1307,12 @@ function handleInit(message) {
   state.board.setBoardSize(message.board.width, message.board.height);
   state.board.setObjects(message.objects);
   state.board.clearCursors();
-  state.board.setInteractive(true);
   state.ready = true;
 
   renderUsers();
   renderPages();
   updateToolbar();
+  applyWorkspaceMode();
   setStatus('online', 'Подключено');
 
   els.usersHint.textContent =
@@ -1284,6 +1451,19 @@ function bindKeyboard() {
   document.addEventListener('keydown', (event) => {
     const target = event.target;
     if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+    if (isPresentation()) {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        if (isStaff(state.user?.role)) {
+          event.preventDefault();
+          requestSlide(event.key === 'ArrowLeft' ? -1 : 1);
+        }
+        return;
+      }
+      if (['Delete', 'Backspace', 'F2'].includes(event.key)) {
+        event.preventDefault();
+        return;
+      }
+    }
     if (event.ctrlKey || event.metaKey) {
       if (event.key.toLowerCase() === 'z') {
         event.preventDefault();

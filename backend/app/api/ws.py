@@ -27,6 +27,7 @@ from app.models.schemas import (
     ObjectLock,
     ObjectTransform,
     ObjectUpdate,
+    PresentationSlide,
     ShapeAdd,
     StrokeEnd,
     StrokePoint,
@@ -49,6 +50,7 @@ from app.services.access import can_access_room
 from app.services.accounts import AccountStore
 from app.services.auth import SESSION_COOKIE, is_staff
 from app.services.room_manager import ConnectedUser, RateLimiter, Room, RoomManager
+from app.services.workspaces import PRESENTATION_KIND
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +90,28 @@ def _new_object(
 
 def _can_edit_object(user: ConnectedUser, obj: dict[str, Any]) -> bool:
     return is_staff(user.role) or obj.get("author") == user.id
+
+
+def _is_presentation(room: Room, workspace_id: str) -> bool:
+    workspace = room.get_workspace(workspace_id)
+    return bool(workspace and workspace.get("kind") == PRESENTATION_KIND)
+
+
+PRESENTATION_ALLOWED = {
+    "stroke_start",
+    "stroke_point",
+    "stroke_end",
+    "cursor",
+    "presentation_slide",
+    "kick",
+    "workspace_switch",
+    "workspace_create",
+    "workspace_rename",
+    "workspace_delete",
+    "workspace_reorder",
+    "workspace_pull",
+    "workspace_move_ack",
+}
 
 
 def _locked_for(user: ConnectedUser, room: Room, obj: dict[str, Any]) -> bool:
@@ -396,6 +420,13 @@ async def _handle_message(
     if not user.limiter.allow(category):
         return
 
+    if _is_presentation(room, user.workspace_id) and kind not in PRESENTATION_ALLOWED:
+        await manager.send_to(
+            user,
+            _error("presentation_view_only", "На презентации можно только рисовать кистью"),
+        )
+        return
+
     if isinstance(message, StrokeStart):
         await _handle_stroke_start(manager, room, user, message)
     elif isinstance(message, StrokePoint):
@@ -436,6 +467,8 @@ async def _handle_message(
         await _handle_kick(manager, room, user, message)
     elif isinstance(message, WorkspaceSwitch):
         await _handle_workspace_switch(manager, room, user, message)
+    elif isinstance(message, PresentationSlide):
+        await _handle_presentation_slide(manager, room, user, message)
     elif isinstance(message, WorkspaceCreate):
         await _handle_workspace_create(manager, room, user, message, settings)
     elif isinstance(message, WorkspaceRename):
@@ -467,14 +500,28 @@ async def _handle_stroke_start(
         await manager.send_to(user, _error("duplicate_object", "Объект уже существует"))
         return
 
+    workspace = room.get_workspace(user.workspace_id)
+    presentation = bool(workspace and workspace.get("kind") == PRESENTATION_KIND)
+    if presentation and (not is_staff(user.role) or message.tool != "brush"):
+        await manager.send_to(
+            user,
+            _error("presentation_brush_only", "На презентации доступна только кисть учителя"),
+        )
+        return
+
+    fields: dict[str, Any] = {
+        "tool": message.tool,
+        "color": message.color,
+        "width": message.width,
+        "points": [[message.point.x, message.point.y]],
+    }
+    if presentation:
+        fields["slide"] = int(workspace.get("slideIndex", 0) or 0)
     obj = _new_object(
         user,
         message.objectId,
         "stroke",
-        tool=message.tool,
-        color=message.color,
-        width=message.width,
-        points=[[message.point.x, message.point.y]],
+        **fields,
     )
     user.strokes[message.objectId] = obj
     await manager.broadcast(
@@ -1271,6 +1318,43 @@ async def _handle_workspace_switch(
         await manager.send_to(user, _error("workspace_not_found", "Страница не найдена"))
 
 
+async def _handle_presentation_slide(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: PresentationSlide,
+) -> None:
+    if not is_staff(user.role):
+        await manager.send_to(user, _error("forbidden", "Переключать слайды может только учитель"))
+        return
+    if not await _check_workspace(manager, user, message):
+        return
+    workspace = room.get_workspace(user.workspace_id)
+    if workspace is None or workspace.get("kind") != PRESENTATION_KIND:
+        await manager.send_to(user, _error("invalid_message", "Страница не является презентацией"))
+        return
+    slides = workspace.get("slides") or []
+    if not 0 <= message.slideIndex < len(slides):
+        await manager.send_to(user, _error("invalid_message", "Слайд не найден"))
+        return
+    if workspace.get("slideIndex") == message.slideIndex:
+        return
+
+    await manager.finalize_user_strokes(room, user)
+    workspace["slideIndex"] = message.slideIndex
+    manager.mark_dirty(room)
+    await manager.broadcast(
+        room,
+        {
+            "type": "presentation_slide",
+            "workspaceId": user.workspace_id,
+            "slideIndex": message.slideIndex,
+            "objects": manager.objects_for(room, user.workspace_id),
+        },
+        workspace_id=user.workspace_id,
+    )
+
+
 async def _handle_workspace_create(
     manager: RoomManager,
     room: Room,
@@ -1284,7 +1368,22 @@ async def _handle_workspace_create(
     if len(room.workspaces) >= settings.max_workspaces_per_room:
         await manager.send_to(user, _error("workspace_limit", "Достигнут лимит страниц"))
         return
-    workspace = manager.create_workspace(room, message.name)
+    if message.kind == PRESENTATION_KIND:
+        if not message.slides:
+            await manager.send_to(user, _error("invalid_presentation", "В презентации нет слайдов"))
+            return
+        for url in message.slides:
+            if not await manager.images.exists(url):
+                await manager.send_to(user, _error("invalid_presentation", "Слайд не найден"))
+                return
+        workspace = manager.create_workspace(
+            room,
+            message.name or "Презентация",
+            kind=PRESENTATION_KIND,
+            slides=message.slides,
+        )
+    else:
+        workspace = manager.create_workspace(room, message.name)
     await manager.broadcast(room, {"type": "workspace_created", "workspace": workspace})
     await manager.switch_workspace(room, user, workspace["id"], reason="create")
 

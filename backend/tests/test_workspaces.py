@@ -44,6 +44,45 @@ def test_normalize_sorts_drops_duplicates_and_repairs_positions() -> None:
     ]
 
 
+def test_normalize_preserves_presentation() -> None:
+    raw = [
+        {
+            "id": "ws_p",
+            "name": "Урок",
+            "position": 3,
+            "kind": "presentation",
+            "slides": ["/uploads/a.jpg", "/uploads/b.jpg"],
+            "slideIndex": 1,
+        }
+    ]
+    assert normalize_workspaces(raw) == [
+        {
+            "id": "ws_p",
+            "name": "Урок",
+            "position": 0,
+            "kind": "presentation",
+            "slides": ["/uploads/a.jpg", "/uploads/b.jpg"],
+            "slideIndex": 1,
+        }
+    ]
+
+
+def test_normalize_clamps_slides_and_index() -> None:
+    raw = [
+        {
+            "id": "ws_p",
+            "name": "Урок",
+            "position": 0,
+            "kind": "presentation",
+            "slides": [f"/uploads/{index}.jpg" for index in range(100)] + ["bad"],
+            "slideIndex": 999,
+        }
+    ]
+    workspace = normalize_workspaces(raw)[0]
+    assert len(workspace["slides"]) == 80
+    assert workspace["slideIndex"] == 79
+
+
 def test_assign_orphan_objects_moves_them_to_first_workspace() -> None:
     workspaces = [
         {"id": "ws_a", "name": "Первая", "position": 0},
@@ -90,6 +129,30 @@ def test_workspace_messages_parse() -> None:
         ).type
         == "workspace_switch"
     )
+
+
+def test_presentation_messages_parse() -> None:
+    created = WorkspaceCreate.model_validate(
+        {
+            "type": "workspace_create",
+            "name": "Урок",
+            "kind": "presentation",
+            "slides": ["/uploads/a.jpg"],
+        }
+    )
+    assert created.kind == "presentation"
+    assert created.slides == ["/uploads/a.jpg"]
+    assert WorkspaceCreate.model_validate({"type": "workspace_create"}).kind == "page"
+    slide = client_message_adapter.validate_python(
+        {"type": "presentation_slide", "workspaceId": "ws_default", "slideIndex": 2}
+    )
+    assert slide.type == "presentation_slide"
+    with pytest.raises(ValidationError):
+        WorkspaceCreate.model_validate(
+            {"type": "workspace_create", "kind": "presentation", "slides": ["not a url"]}
+        )
+    with pytest.raises(ValidationError):
+        WorkspaceCreate.model_validate({"type": "workspace_create", "kind": "presentation"})
 
 
 def test_delete_and_move_ack_parse() -> None:

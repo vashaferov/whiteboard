@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     frontend_dir: Path = PROJECT_ROOT / "frontend"
 
     max_upload_mb: int = 5
+    max_presentation_mb: int = 40
+    max_presentation_slides: int = 80
     snapshot_interval_seconds: float = 2.0
     room_ttl_days: int = 30
     max_objects_per_room: int = 20000

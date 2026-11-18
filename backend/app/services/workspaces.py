@@ -17,6 +17,8 @@ from app.models.schemas import WORKSPACE_ID_PATTERN
 DEFAULT_WORKSPACE_ID = "ws_default"
 DEFAULT_WORKSPACE_NAME = "Страница 1"
 MAX_WORKSPACE_NAME_LENGTH = 60
+PRESENTATION_KIND = "presentation"
+MAX_PRESENTATION_SLIDES = 80
 
 _WORKSPACE_ID_RE = re.compile(WORKSPACE_ID_PATTERN)
 _PAGE_NAME_RE = re.compile(r"^Страница (\d+)$")
@@ -64,9 +66,26 @@ def normalize_workspaces(raw: Any) -> list[dict[str, Any]]:
         if not name:
             continue
         seen.add(workspace_id)
-        workspaces.append(
-            {"id": workspace_id, "name": name, "position": _position(item.get("position"))}
-        )
+        workspace: dict[str, Any] = {
+            "id": workspace_id,
+            "name": name,
+            "position": _position(item.get("position")),
+        }
+        if item.get("kind") == PRESENTATION_KIND:
+            slides = [
+                slide
+                for slide in item.get("slides") or []
+                if isinstance(slide, str) and 1 <= len(slide) <= 500
+            ][:MAX_PRESENTATION_SLIDES]
+            index = item.get("slideIndex")
+            if isinstance(index, bool) or not isinstance(index, int):
+                index = 0
+            workspace.update(
+                kind=PRESENTATION_KIND,
+                slides=slides,
+                slideIndex=min(max(index, 0), max(len(slides) - 1, 0)),
+            )
+        workspaces.append(workspace)
     workspaces.sort(key=lambda workspace: workspace["position"])
     for position, workspace in enumerate(workspaces):
         workspace["position"] = position

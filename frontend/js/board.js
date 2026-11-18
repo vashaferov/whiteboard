@@ -125,6 +125,8 @@ export class Board {
 
     this.objects = new Map();
     this.cursors = new Map();
+    this.slideImage = null;
+    this.slideToken = 0;
 
     this._onWindowResize = () => this.fit();
     window.addEventListener('resize', this._onWindowResize);
@@ -162,6 +164,54 @@ export class Board {
     this.paper.size({ width, height });
     this.grid.size({ width, height });
     this.fit();
+  }
+
+  clearPresentationSlide() {
+    this.slideToken += 1;
+    this.slideImage?.destroy();
+    this.slideImage = null;
+    this.grid.visible(true);
+    this.backgroundLayer.batchDraw();
+  }
+
+  async setPresentationSlide(url) {
+    const token = ++this.slideToken;
+    this.slideImage?.destroy();
+    this.slideImage = null;
+    if (!url) {
+      this.grid.visible(true);
+      this.backgroundLayer.batchDraw();
+      return;
+    }
+
+    const image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error('Не удалось открыть слайд'));
+      image.src = url;
+    });
+    if (token !== this.slideToken || this.destroyed) return;
+
+    const scale = Math.min(
+      this.width / Math.max(image.naturalWidth, 1),
+      this.height / Math.max(image.naturalHeight, 1),
+    );
+    const width = image.naturalWidth * scale;
+    const height = image.naturalHeight * scale;
+    const node = new Konva.Image({
+      name: 'slide-bg',
+      image,
+      x: (this.width - width) / 2,
+      y: (this.height - height) / 2,
+      width,
+      height,
+      listening: false,
+    });
+    this.backgroundLayer.add(node);
+    node.moveToTop();
+    this.slideImage = node;
+    this.grid.visible(false);
+    this.backgroundLayer.batchDraw();
   }
 
   async exportCanvas() {

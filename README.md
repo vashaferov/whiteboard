@@ -36,6 +36,10 @@
 - Курсоры участников с троттлингом.
 - Очистка доски, удаление объектов и отключение участника — только учитель/администратор.
 - Несколько страниц (воркспейсов) в комнате: список видят все, каждый переключается сам.
+- Презентации: учитель загружает PDF (до 40 МБ, 80 слайдов), листает слайды
+  и рисует на них только кистью; ученик видит текущий слайд и пометки, но не
+  может рисовать, менять слайд или пользоваться инструментами. Пометки хранятся
+  отдельно для каждого слайда.
 - Учитель создаёт, переименовывает, удаляет и меняет порядок страниц; переносит одного,
   нескольких или всех учеников на свою текущую страницу. Черновик текста сохраняется на
   старой странице.
@@ -190,14 +194,14 @@ docker-compose.prod.yml     # prod: Caddy + whiteboard + Redis + SeaweedFS
 `image_add`, `connector_add`, `frame_add`, `frame_move`, `frame_style`, `object_update`,
 `object_transform`, `text_update`, `object_delete`, `object_lock`, `undo`, `cursor`, `clear`,
 `kick`, `workspace_switch`, `workspace_create`, `workspace_rename`, `workspace_delete`,
-`workspace_reorder`, `workspace_pull`, `workspace_move_ack`.
+`workspace_reorder`, `workspace_pull`, `workspace_move_ack`, `presentation_slide`.
 
 Сервер → клиент: `init`, `user_joined`, `user_left`, `stroke_*`, `shape_add`, `text_add`,
 `image_add`, `connector_add`, `frame_add`, `frame_captured`, `frame_moved`, `frame_style`,
 `object_update`, `object_transform`, `text_update`, `object_delete`, `object_lock`,
-`objects_restored`, `cursor`, `cursor_remove`, `workspace_state`, `workspace_created`,
-`workspace_renamed`, `workspace_reordered`, `workspace_deleted`, `workspace_prepare_move`,
-`workspace_moved`, `clear`, `error`, `kicked`.
+`objects_restored`, `presentation_slide`, `cursor`, `cursor_remove`, `workspace_state`,
+`workspace_created`, `workspace_renamed`, `workspace_reordered`, `workspace_deleted`,
+`workspace_prepare_move`, `workspace_moved`, `clear`, `error`, `kicked`.
 
 Дополнительно:
 
@@ -269,7 +273,8 @@ reload, удаление цели переключения, удаление н�
 перемещение только что вставленной картинки, ластик только по штрихам и права ученика,
 отмена действий и блокировка объектов, блок-схема с подписью и стрелками, фреймы
 (фон, захват, движение, открепление, удаление, права), растяжение панели участников
-и контраст курсоров, вставка картинок из буфера и экспорт страницы в PDF.
+и контраст курсоров, вставка картинок из буфера и экспорт страницы в PDF,
+загрузка PDF-презентации, листание слайдов, пометки по слайдам и режим просмотра ученика.
 
 ## Docker
 

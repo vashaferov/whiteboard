@@ -796,3 +796,41 @@ async def test_objects_restored_is_shared(settings, tmp_path, redis_pair) -> Non
 
     await manager_a.shutdown()
     await manager_b.shutdown()
+
+
+async def test_presentation_slides_are_shared(settings, tmp_path, redis_pair) -> None:
+    first_redis, second_redis = redis_pair
+    manager_a = make_manager(settings, tmp_path, "pres-a", first_redis)
+    manager_b = make_manager(settings, tmp_path, "pres-b", second_redis)
+    room_a = await manager_a.get_or_create("room-pres")
+    room_b = await manager_b.get_or_create("room-pres")
+
+    workspace = manager_a.create_workspace(
+        room_a,
+        "Урок",
+        kind="presentation",
+        slides=["/uploads/a.jpg", "/uploads/b.jpg"],
+    )
+    await manager_a.broadcast(
+        room_a,
+        {"type": "workspace_created", "workspace": workspace},
+    )
+    await wait_for(lambda: room_b.get_workspace(workspace["id"]) is not None)
+    remote = room_b.get_workspace(workspace["id"])
+    assert remote["kind"] == "presentation"
+    assert remote["slides"] == ["/uploads/a.jpg", "/uploads/b.jpg"]
+    assert remote["slideIndex"] == 0
+
+    await manager_a.broadcast(
+        room_a,
+        {
+            "type": "presentation_slide",
+            "workspaceId": workspace["id"],
+            "slideIndex": 1,
+            "objects": [],
+        },
+    )
+    await wait_for(lambda: room_b.get_workspace(workspace["id"])["slideIndex"] == 1)
+
+    await manager_a.shutdown()
+    await manager_b.shutdown()
