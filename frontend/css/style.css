@@ -655,6 +655,10 @@ textarea {
   gap: 6px;
 }
 
+.users-panel.is-resizing {
+  transition: none;
+}
+
 .users-panel.is-collapsed {
   width: 44px;
   min-width: 44px;
