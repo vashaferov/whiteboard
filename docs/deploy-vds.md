@@ -55,6 +55,8 @@ cd ~/whiteboard
 | `WB_TAG` | `latest` (workflow переопределяет тегом коммита) |
 | `WB_PORT` | `8010` |
 | `S3_BUCKET` | пусто — локальные uploads |
+| `MAX_PRESENTATION_MB` | `40` (лимит PDF-презентации) |
+| `MAX_PRESENTATION_SLIDES` | `80` |
 | `SENTRY_DSN` | необязательно |
 
 Права на файл: `chmod 600 .env`.
