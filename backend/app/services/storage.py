@@ -64,9 +64,7 @@ class SnapshotStore:
                 "ALTER TABLE room_snapshots ADD COLUMN workspaces TEXT NOT NULL DEFAULT '[]'"
             )
         if "board" not in columns:
-            conn.execute(
-                "ALTER TABLE room_snapshots ADD COLUMN board TEXT NOT NULL DEFAULT '{}'"
-            )
+            conn.execute("ALTER TABLE room_snapshots ADD COLUMN board TEXT NOT NULL DEFAULT '{}'")
 
     async def load(self, room_id: str) -> Snapshot | None:
         return await asyncio.to_thread(self._load_sync, room_id)

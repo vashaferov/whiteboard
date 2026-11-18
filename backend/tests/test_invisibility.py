@@ -7,12 +7,6 @@ from tests.support import ws_connect
 from tests.test_board_elements import barrier, codes, recv_until
 
 
-def last_roster(messages: list[dict]) -> dict:
-    rosters = [message for message in messages if message["type"] == "users_state"]
-    assert rosters, messages
-    return rosters[-1]
-
-
 def ids(roster: dict) -> list[str]:
     return [user["id"] for user in roster["users"]]
 
@@ -44,10 +38,10 @@ def test_hidden_admin_is_absent_for_student(client: TestClient, login_user) -> N
         )
 
         aw.send_json({"type": "set_invisible", "invisible": False})
-        assert admin["user"]["id"] in ids(last_roster(barrier(sw)))
+        assert admin["user"]["id"] in ids(recv_until(sw, "users_state"))
 
         aw.send_json({"type": "set_invisible", "invisible": True})
-        assert admin["user"]["id"] not in ids(last_roster(barrier(sw)))
+        assert admin["user"]["id"] not in ids(recv_until(sw, "users_state"))
 
 
 def test_only_admin_can_toggle_visibility(client: TestClient, login_user) -> None:
@@ -78,6 +72,6 @@ def test_hidden_admin_cursor_is_private(client: TestClient, login_user) -> None:
         assert [m for m in barrier(sw) if m["type"] == "cursor"] == []
 
         aw.send_json({"type": "set_invisible", "invisible": False})
-        last_roster(barrier(sw))
+        recv_until(sw, "users_state")
         aw.send_json({"type": "cursor", "workspaceId": "ws_default", "x": 30, "y": 40})
         assert recv_until(sw, "cursor")["id"] == admin["user"]["id"]
