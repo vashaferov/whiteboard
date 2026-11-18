@@ -54,6 +54,7 @@ const state = {
   color: PALETTE[1],
   width: 4,
   tool: 'brush',
+  invisible: false,
   ready: false,
   textPoint: null,
   textEditObjectId: null,
@@ -117,6 +118,7 @@ function init() {
   bindUsersResizer();
   bindSidebarToggles();
   bindToolbar();
+  bindBoardSize();
   bindTextEditor();
   bindKeyboard();
   bindWindowEvents();
@@ -169,6 +171,11 @@ function cacheElements() {
   els.status = $('#status');
   els.roomTitle = $('#room-title');
   els.framePanel = $('#frame-panel');
+  els.boardSizeBtn = $('#board-size-btn');
+  els.boardSizePanel = $('#board-size-panel');
+  els.boardWidth = $('#board-width');
+  els.boardHeight = $('#board-height');
+  els.boardSizeApply = $('#board-size-apply');
   els.frameColors = $('#frame-colors');
   els.framePatternButtons = {
     none: $('#frame-pattern-none'),
@@ -180,6 +187,7 @@ function cacheElements() {
   els.usersPanel = $('#users-panel');
   els.usersResizer = $('#users-resizer');
   els.usersToggle = $('#users-toggle');
+  els.invisibleToggle = $('#invisible-toggle');
   els.pullActions = $('#pull-actions');
   els.pullSelected = $('#pull-selected');
   els.pullAll = $('#pull-all');
@@ -266,18 +274,19 @@ function startRoom({ room, user, permissions, board }) {
     height: size.height,
     canEditObject: (object) =>
       Boolean(state.user) &&
-      (isStaff(state.user.role) || (!lockedFor(object) && object.author === state.user.id)),
+      !lockedFor(object) &&
+      (isStaff(state.user.role) || object.author === state.user.id),
     canDeleteObject: (object) => {
-      if (!state.user) return false;
-      if (isStaff(state.user.role)) return true;
-      if (lockedFor(object) || object.author !== state.user.id) return false;
+      if (!state.user || lockedFor(object)) return false;
       if (object.type === 'frame' && state.board) {
         for (const entry of state.board.objects.values()) {
           if (entry.data.frameId !== object.id) continue;
-          if (lockedFor(entry.data) || entry.data.author !== state.user.id) return false;
+          if (lockedFor(entry.data)) return false;
+          if (!isStaff(state.user.role) && entry.data.author !== state.user.id) return false;
         }
       }
-      return true;
+      if (isStaff(state.user.role)) return true;
+      return object.author === state.user.id;
     },
     onObjectMove: (objectId, x, y) => {
       sendWorkspace({
@@ -391,6 +400,7 @@ function leaveRoom(message = '') {
   els.textEditor.hidden = true;
   els.textEditor.value = '';
   els.framePanel.hidden = true;
+  els.boardSizePanel.hidden = true;
   els.app.hidden = true;
   els.clearBtn.hidden = true;
   history.replaceState(null, '', '/');
@@ -490,10 +500,56 @@ function updateFontControl() {
 }
 
 function lockedFor(object) {
-  if (!object || !state.user || isStaff(state.user.role)) return false;
+  if (!object) return false;
   if (object.locked) return true;
   if (!object.frameId) return false;
   return Boolean(state.board?.getObjectData(object.frameId)?.locked);
+}
+
+function updateInvisibilityToggle() {
+  if (!els.invisibleToggle) return;
+  const admin = state.user?.role === 'admin';
+  els.invisibleToggle.hidden = !admin;
+  if (!admin) return;
+  const hidden = Boolean(state.invisible);
+  els.invisibleToggle.setAttribute('aria-pressed', String(hidden));
+  const label = hidden ? 'Показать меня ученикам' : 'Скрыть меня от учеников';
+  els.invisibleToggle.title = label;
+  els.invisibleToggle.setAttribute('aria-label', label);
+}
+
+function updateBoardSizeUI(presentation = isPresentation()) {
+  const canResize = !presentation && isStaff(state.user?.role);
+  els.boardSizeBtn.hidden = !canResize;
+  if (!canResize) els.boardSizePanel.hidden = true;
+}
+
+function updateBoardSizePanel() {
+  if (!els.boardSizePanel || els.boardSizePanel.hidden || !state.board) return;
+  els.boardWidth.value = String(state.board.width);
+  els.boardHeight.value = String(state.board.height);
+}
+
+function bindBoardSize() {
+  if (!els.boardSizeBtn || !els.boardSizePanel) return;
+  els.boardSizeBtn.addEventListener('click', () => {
+    els.boardSizePanel.hidden = !els.boardSizePanel.hidden;
+    updateBoardSizePanel();
+  });
+  for (const preset of document.querySelectorAll('[data-board-preset]')) {
+    preset.addEventListener('click', () => {
+      const [width, height] = preset.dataset.boardPreset.split('x');
+      els.boardWidth.value = width;
+      els.boardHeight.value = height;
+    });
+  }
+  els.boardSizeApply.addEventListener('click', () => {
+    const width = Number(els.boardWidth.value);
+    const height = Number(els.boardHeight.value);
+    if (!Number.isInteger(width) || !Number.isInteger(height)) return;
+    sendWorkspace({ type: 'board_resize', width, height });
+    els.boardSizePanel.hidden = true;
+  });
 }
 
 function updateLockButton() {
@@ -619,6 +675,8 @@ function updateToolbar() {
   els.undoBtn.hidden = presentation && !isStaff(state.user?.role);
   els.imageBtn.disabled = false;
   updateFontControl();
+  updateBoardSizeUI(presentation);
+  updateInvisibilityToggle();
 }
 
 // -------------------------------------------------------------------- image
@@ -823,6 +881,7 @@ function applyWorkspaceMode() {
   els.clearBtn.hidden = presentation || !state.permissions.canClear;
   els.framePanel.hidden = true;
   updateFontControl();
+  updateBoardSizeUI(presentation);
 
   if (presentation) {
     if (!wasPresentation) state.toolBeforePresentation = state.tool;
@@ -1094,6 +1153,16 @@ function handleServerEvent(message) {
     case 'init':
       handleInit(message);
       break;
+    case 'users_state': {
+      state.users = new Map(message.users.map((user) => [user.id, user]));
+      if (typeof message.invisible === 'boolean') state.invisible = message.invisible;
+      for (const id of [...(state.board?.cursors.keys() ?? [])]) {
+        if (!state.users.has(id)) state.board?.removeCursor(id);
+      }
+      renderUsers();
+      updateInvisibilityToggle();
+      break;
+    }
     case 'user_joined':
       state.users.set(message.user.id, message.user);
       renderUsers();
@@ -1102,6 +1171,10 @@ function handleServerEvent(message) {
       state.users.delete(message.id);
       board.removeCursor(message.id);
       renderUsers();
+      break;
+    case 'board_resize':
+      state.board?.setBoardSize(message.width, message.height);
+      updateBoardSizePanel();
       break;
     case 'stroke_start':
     case 'stroke_point':
@@ -1370,6 +1443,7 @@ function handleInit(message) {
     color: me?.color || '',
   };
   state.permissions = message.permissions;
+  state.invisible = Boolean(message.invisible);
   state.users = new Map(message.users.map((user) => [user.id, user]));
 
   state.workspaces = message.workspaces || [];
@@ -1390,6 +1464,7 @@ function handleInit(message) {
   renderPages();
   updateToolbar();
   applyWorkspaceMode();
+  updateInvisibilityToggle();
   setStatus('online', 'Подключено');
 
   els.usersHint.textContent =
@@ -1439,6 +1514,7 @@ function renderUsers() {
   for (const user of users) {
     const item = document.createElement('li');
     item.className = 'user';
+    item.dataset.role = user.role;
 
     if (canPull && user.role === 'student') {
       const check = document.createElement('input');
@@ -1469,6 +1545,13 @@ function renderUsers() {
       const badge = document.createElement('span');
       badge.className = 'badge';
       badge.textContent = user.role === 'admin' ? 'администратор' : 'учитель';
+      item.appendChild(badge);
+    }
+
+    if (isStaff(user.role) && user.invisible) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = 'невидимка';
       item.appendChild(badge);
     }
 
@@ -1726,6 +1809,11 @@ function setUsersCollapsed(collapsed, { persist = true } = {}) {
 function bindSidebarToggles() {
   els.usersToggle?.addEventListener('click', () => {
     setUsersCollapsed(!els.usersPanel.classList.contains('is-collapsed'));
+  });
+  els.invisibleToggle?.addEventListener('click', () => {
+    state.invisible = !state.invisible;
+    updateInvisibilityToggle();
+    sendWorkspace({ type: 'set_invisible', invisible: state.invisible });
   });
   setPagesCollapsed(localStorage.getItem(PAGES_COLLAPSED_KEY) === '1', { persist: false });
   setUsersCollapsed(localStorage.getItem(USERS_COLLAPSED_KEY) === '1', { persist: false });

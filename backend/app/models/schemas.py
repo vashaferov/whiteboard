@@ -290,6 +290,12 @@ class ObjectTransform(_Message):
     fontSize: float | None = Field(default=None, ge=8, le=200)
 
 
+class BoardResize(_Message):
+    type: Literal["board_resize"]
+    width: int = Field(ge=640, le=4000)
+    height: int = Field(ge=640, le=4000)
+
+
 class TextUpdate(_Message):
     type: Literal["text_update"]
     objectId: str = Field(pattern=OBJECT_ID_PATTERN)
@@ -315,6 +321,11 @@ class ObjectLock(_Message):
 
 class Undo(_Message):
     type: Literal["undo"]
+
+
+class SetInvisible(_Message):
+    type: Literal["set_invisible"]
+    invisible: bool
 
 
 class Cursor(_Message):
@@ -439,9 +450,11 @@ ClientMessage = Annotated[
     | ObjectTransform
     | TextUpdate
     | TextFont
+    | BoardResize
     | ObjectDelete
     | ObjectLock
     | Undo
+    | SetInvisible
     | PresentationSlide
     | Cursor
     | Clear

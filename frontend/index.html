@@ -241,6 +241,28 @@
           <div id="frame-colors" class="frame-panel__colors" aria-label="Цвет фона"></div>
         </div>
 
+        <button id="board-size-btn" class="btn btn--ghost" type="button" hidden>Холст</button>
+
+        <div id="board-size-panel" class="board-size-panel" hidden>
+          <label class="board-size-panel__field">
+            Ширина
+            <input id="board-width" type="number" min="640" max="4000" step="10" />
+          </label>
+          <label class="board-size-panel__field">
+            Высота
+            <input id="board-height" type="number" min="640" max="4000" step="10" />
+          </label>
+          <button id="board-size-apply" class="btn btn--small btn--primary" type="button">
+            Применить
+          </button>
+          <div class="board-size-panel__presets">
+            <button class="btn btn--small" type="button" data-board-preset="1600x900">16:9</button>
+            <button class="btn btn--small" type="button" data-board-preset="1440x1080">4:3</button>
+            <button class="btn btn--small" type="button" data-board-preset="1587x1123">A4</button>
+            <button class="btn btn--small" type="button" data-board-preset="1200x1200">1:1</button>
+          </div>
+        </div>
+
         <button id="lock-btn" class="btn btn--ghost" type="button" title="Заблокировать" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <rect x="5" y="11" width="14" height="9" rx="2" />
@@ -306,6 +328,15 @@
         <aside id="users-panel" class="users-panel">
           <div class="users-panel__header">
             <h2 class="users-panel__title">Участники <span id="user-count"></span></h2>
+            <button
+              id="invisible-toggle"
+              class="panel-toggle"
+              type="button"
+              aria-label="Показать меня ученикам"
+              aria-pressed="true"
+              title="Показать меня ученикам"
+              hidden
+            >👁</button>
             <button
               id="users-toggle"
               class="panel-toggle"

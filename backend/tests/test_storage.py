@@ -23,6 +23,15 @@ async def test_snapshot_roundtrip(tmp_path: Path) -> None:
     await store.close()
 
 
+async def test_snapshot_roundtrip_preserves_board(tmp_path: Path) -> None:
+    store = SnapshotStore(tmp_path / "whiteboard.db")
+    await store.save("room-1", [], 0, [], board={"width": 1200, "height": 800})
+    snapshot = await store.load("room-1")
+    assert snapshot is not None
+    assert snapshot.board == {"width": 1200, "height": 800}
+    await store.close()
+
+
 async def test_snapshot_update_replaces_row(tmp_path: Path) -> None:
     store = SnapshotStore(tmp_path / "whiteboard.db")
     await store.save("room-1", [{"id": "old"}], 1, [])

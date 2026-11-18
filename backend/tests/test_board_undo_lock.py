@@ -52,8 +52,12 @@ def test_student_cannot_change_locked_object(client: TestClient, login_user) -> 
         assert codes(flush(sw)) == ["locked"]
 
         tw.send_json({"type": "object_update", "objectId": "block", "x": 90, "y": 90})
-        moved = recv_until(sw, "object_update")
-        assert (moved["x"], moved["y"]) == (90, 90)
+        assert "locked" in codes(barrier(tw))
+        assert "object_update" not in types(barrier(sw))
+
+
+def types(messages: list[dict]) -> list[str]:
+    return [message["type"] for message in messages]
 
 
 def test_only_staff_can_lock(client: TestClient, login_user) -> None:
@@ -324,6 +328,53 @@ def test_undo_survives_workspace_switch(client: TestClient, login_user) -> None:
         recv_until(tw, "workspace_state")
         tw.send_json({"type": "undo"})
         assert recv_until(tw, "objects_restored")["removedIds"] == ["second"]
+
+
+def test_teacher_cannot_change_locked_object(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    with ws_connect(client, teacher["token"]) as tw:
+        tw.receive_json()
+        barrier(tw)
+        tw.send_json(shape("block"))
+        barrier(tw)
+        tw.send_json({"type": "object_lock", "objectId": "block", "locked": True})
+        barrier(tw)
+
+        for message in (
+            {"type": "object_update", "objectId": "block", "x": 90, "y": 90},
+            {
+                "type": "object_transform",
+                "objectId": "block",
+                "x": 90,
+                "y": 90,
+                "rotation": 0,
+                "width": 60,
+                "height": 50,
+            },
+            {"type": "object_delete", "objectId": "block"},
+        ):
+            tw.send_json(message)
+            assert "locked" in codes(barrier(tw))
+
+        tw.send_json({"type": "undo"})
+        assert not recv_until(tw, "objects_restored")["objects"][0]["object"]["locked"]
+        tw.send_json({"type": "object_update", "objectId": "block", "x": 90, "y": 90})
+        assert "locked" not in codes(barrier(tw))
+
+
+def test_teacher_cannot_change_child_of_locked_frame(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    with ws_connect(client, teacher["token"]) as tw:
+        tw.receive_json()
+        barrier(tw)
+        tw.send_json(frame("frame-1"))
+        barrier(tw)
+        tw.send_json(shape("inner"))
+        barrier(tw)
+        tw.send_json({"type": "object_lock", "objectId": "frame-1", "locked": True})
+        barrier(tw)
+        tw.send_json({"type": "object_update", "objectId": "inner", "x": 70, "y": 70})
+        assert "locked" in codes(barrier(tw))
 
 
 def test_undo_cleared_by_clear(client: TestClient, login_user) -> None:

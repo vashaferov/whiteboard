@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS room_snapshots (
     objects    TEXT NOT NULL,
     seq        INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL,
-    workspaces TEXT NOT NULL DEFAULT '[]'
+    workspaces TEXT NOT NULL DEFAULT '[]',
+    board      TEXT NOT NULL DEFAULT '{}'
 );
 """
 
@@ -30,6 +31,7 @@ class Snapshot:
     seq: int
     updated_at: str
     workspaces: list[dict[str, Any]]
+    board: dict[str, Any] = field(default_factory=dict)
 
 
 class SnapshotStore:
@@ -61,6 +63,8 @@ class SnapshotStore:
             conn.execute(
                 "ALTER TABLE room_snapshots ADD COLUMN workspaces TEXT NOT NULL DEFAULT '[]'"
             )
+        if "board" not in columns:
+            conn.execute("ALTER TABLE room_snapshots ADD COLUMN board TEXT NOT NULL DEFAULT '{}'")
 
     async def load(self, room_id: str) -> Snapshot | None:
         return await asyncio.to_thread(self._load_sync, room_id)
@@ -68,7 +72,7 @@ class SnapshotStore:
     def _load_sync(self, room_id: str) -> Snapshot | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT objects, seq, updated_at, workspaces FROM room_snapshots "
+                "SELECT objects, seq, updated_at, workspaces, board FROM room_snapshots "
                 "WHERE room_id = ?",
                 (room_id,),
             ).fetchone()
@@ -87,8 +91,18 @@ class SnapshotStore:
             workspaces = []
         if not isinstance(workspaces, list):
             workspaces = []
+        try:
+            board = json.loads(row[4])
+        except (TypeError, json.JSONDecodeError):
+            board = {}
+        if not isinstance(board, dict):
+            board = {}
         return Snapshot(
-            objects=objects, seq=int(row[1]), updated_at=str(row[2]), workspaces=workspaces
+            objects=objects,
+            seq=int(row[1]),
+            updated_at=str(row[2]),
+            workspaces=workspaces,
+            board=board,
         )
 
     async def save(
@@ -97,29 +111,44 @@ class SnapshotStore:
         objects: list[dict[str, Any]],
         seq: int,
         workspaces: list[dict[str, Any]],
+        board: dict[str, Any] | None = None,
     ) -> None:
         payload = json.dumps(objects, ensure_ascii=False, separators=(",", ":"))
         workspaces_payload = json.dumps(workspaces, ensure_ascii=False, separators=(",", ":"))
+        board_payload = json.dumps(board or {}, ensure_ascii=False, separators=(",", ":"))
         updated_at = datetime.now(UTC).isoformat()
         await asyncio.to_thread(
-            self._save_sync, room_id, payload, seq, updated_at, workspaces_payload
+            self._save_sync,
+            room_id,
+            payload,
+            seq,
+            updated_at,
+            workspaces_payload,
+            board_payload,
         )
 
     def _save_sync(
-        self, room_id: str, payload: str, seq: int, updated_at: str, workspaces_payload: str
+        self,
+        room_id: str,
+        payload: str,
+        seq: int,
+        updated_at: str,
+        workspaces_payload: str,
+        board_payload: str,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO room_snapshots (room_id, objects, seq, updated_at, workspaces)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO room_snapshots (room_id, objects, seq, updated_at, workspaces, board)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(room_id) DO UPDATE SET
                     objects = excluded.objects,
                     seq = excluded.seq,
                     updated_at = excluded.updated_at,
-                    workspaces = excluded.workspaces
+                    workspaces = excluded.workspaces,
+                    board = excluded.board
                 """,
-                (room_id, payload, seq, updated_at, workspaces_payload),
+                (room_id, payload, seq, updated_at, workspaces_payload, board_payload),
             )
 
     async def delete_older_than(self, days: int) -> int:

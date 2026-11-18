@@ -112,6 +112,11 @@ test('lock: a student cannot move a locked block, teacher can unlock', async ({
     await dragBy(student, start, 120, 80);
     await expect.poll(async () => (await objectPosition(teacher)).x).toBe(before.x);
 
+    await teacher.click('[data-tool="select"]');
+    const teacherStart = await worldToScreen(teacher, { x: 260, y: 240 });
+    await dragBy(teacher, teacherStart, 120, 80);
+    await expect.poll(async () => (await objectPosition(teacher)).x).toBe(before.x);
+
     await teacher.click('#undo-btn');
     await expect.poll(() => lockBadgeCount(student)).toBe(0);
     const afterUnlock = await worldToScreen(student, { x: 260, y: 240 });

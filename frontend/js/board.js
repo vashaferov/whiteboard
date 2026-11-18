@@ -380,7 +380,7 @@ export class Board {
     this.height = height;
     this.paper.size({ width, height });
     this.grid.size({ width, height });
-    this.fit();
+    this.layout();
   }
 
   clearPresentationSlide() {
