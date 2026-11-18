@@ -75,6 +75,24 @@ test('admin: approves, promotes, blocks and resets passwords', async ({ browser,
   await context.close();
 });
 
+test('admin: restores a rejected registration', async ({ browser, request }) => {
+  const login = uniqueLogin('rejected');
+  await registerUser(request, { login, name: 'Отклонённый' });
+
+  const { context, page } = await adminPage(browser, request);
+  await page.fill('#admin-search', login);
+  const row = page.locator('.db-user-row', { hasText: login });
+  await expect(row.locator('.db-user-row__status')).toHaveText('Заявка');
+
+  await row.locator('[data-user-action="reject"]').click();
+  await expect(row.locator('.db-user-row__status')).toHaveText('Отклонён');
+
+  await row.locator('[data-user-action="approve"]').click();
+  await expect(row.locator('.db-user-row__status')).toHaveText('Активен');
+
+  await context.close();
+});
+
 test('admin: sees and deletes any room', async ({ browser, request }) => {
   const roomName = `Комната админа ${Date.now().toString(36)}`;
   const { context, page } = await adminPage(browser, request);

@@ -90,14 +90,21 @@ let roomSearch = '';
 let userSearch = '';
 let userFilter = 'all';
 let userSearchTimer = null;
+let userRowsRequest = 0;
+let adminDataRequest = 0;
+let adminDataError = '';
 let accessRoom = null;
 let accessStudents = [];
 let accessSelected = new Set();
 let accessSelectedDetails = new Map();
 let accessSearch = '';
 let accessLoading = false;
+let accessReady = false;
+let accessLoadFailed = false;
+let accessGeneration = 0;
 let accessSearchTimer = null;
 let accessRequest = 0;
+let roomsRequest = 0;
 let renameTarget = null;
 let deleteTarget = null;
 let passwordTarget = null;
@@ -131,6 +138,21 @@ export function initDashboard(options) {
     accessSelected.clear();
     accessSelectedDetails.clear();
     renderAccessList();
+  });
+
+  els.accessDialog.addEventListener('close', () => {
+    accessGeneration += 1;
+    accessReady = false;
+    els.accessSave.disabled = true;
+    clearTimeout(accessSearchTimer);
+  });
+
+  window.addEventListener('wb:auth', () => {
+    accessGeneration += 1;
+    accessReady = false;
+    clearTimeout(accessSearchTimer);
+    clearTimeout(userSearchTimer);
+    closeCardMenus();
   });
 
   window.addEventListener('focus', () => {
@@ -196,12 +218,30 @@ export function showDashboard({ user, permissions }) {
   roomSearch = '';
   userSearch = '';
   userFilter = 'all';
+  adminDataError = '';
+  roomsRequest += 1;
+  userRowsRequest += 1;
+  adminDataRequest += 1;
+  accessRequest += 1;
+  clearTimeout(userSearchTimer);
+  clearTimeout(accessSearchTimer);
   accessRoom = null;
+  accessStudents = [];
+  accessSelected = new Set();
+  accessSelectedDetails = new Map();
+  accessSearch = '';
+  accessLoading = false;
+  accessReady = false;
+  accessLoadFailed = false;
+  accessGeneration += 1;
   renameTarget = null;
   deleteTarget = null;
   passwordTarget = null;
 
   closeAllDialogs();
+  els.accessSave.disabled = true;
+  els.accessError.hidden = true;
+  els.accessError.textContent = '';
   els.root.hidden = false;
   $('#auth').hidden = true;
   $('#status-screen').hidden = true;
@@ -283,6 +323,15 @@ function renderShell() {
 function renderTip() {
   if (!currentUser) return;
   if (isAdmin()) {
+    if (adminDataError) {
+      els.tip.innerHTML = `
+        <div class="db-tip-card">
+          <div class="db-tip-card__head">${icon('shield')} Нет данных</div>
+          <p>${escapeHtml(adminDataError)}</p>
+          <button type="button" class="db-link" data-db-action="refresh-users">Повторить</button>
+        </div>`;
+      return;
+    }
     const pending = pendingCount();
     if (adminDataLoading && !userCounts.all) {
       els.tip.innerHTML = `
@@ -522,13 +571,17 @@ function roomCard(room) {
 }
 
 async function loadRooms() {
+  const request = ++roomsRequest;
   roomsLoading = true;
   roomsError = '';
   if (page === 'rooms') renderRoomCards();
 
   try {
-    rooms = isAdmin() ? await roomsApi.all() : await roomsApi.list();
+    const next = isAdmin() ? await roomsApi.all() : await roomsApi.list();
+    if (request !== roomsRequest) return;
+    rooms = next;
   } catch (error) {
+    if (request !== roomsRequest) return;
     if (error.status === 401) {
       handlers.onSessionLost();
       return;
@@ -537,6 +590,7 @@ async function loadRooms() {
     roomsError = error.message || 'Не удалось загрузить комнаты';
     showToast(roomsError);
   } finally {
+    if (request !== roomsRequest) return;
     roomsLoading = false;
     if (page === 'rooms') renderRoomCards();
   }
@@ -648,42 +702,54 @@ async function deleteRoom() {
 
 async function openAccessDialog(room) {
   accessRoom = room;
+  const roomId = room.id;
+  const generation = ++accessGeneration;
   accessSelected = new Set();
   accessSelectedDetails = new Map();
   accessStudents = [];
   accessSearch = '';
   accessLoading = true;
+  accessReady = false;
+  accessLoadFailed = false;
+  els.accessSave.disabled = true;
   clearTimeout(accessSearchTimer);
   accessRequest += 1;
   els.accessTitle.textContent = `Доступ к комнате «${room.name}»`;
   els.accessSearch.value = '';
   els.accessError.hidden = true;
+  els.accessError.textContent = '';
   els.accessDialog.showModal();
   renderAccessList();
 
   try {
-    const current = await roomsApi.access(room.id);
+    const current = await roomsApi.access(roomId);
+    if (generation !== accessGeneration || accessRoom?.id !== roomId) return;
     accessSelected = new Set(current.map((student) => student.id));
     accessSelectedDetails = new Map(current.map((student) => [student.id, student]));
+    accessReady = true;
+    els.accessSave.disabled = false;
   } catch (error) {
+    if (generation !== accessGeneration || accessRoom?.id !== roomId) return;
     if (error.status === 401) {
       handlers.onSessionLost();
       return;
     }
+    accessLoadFailed = true;
     showFormError(els.accessError, error.message || 'Не удалось загрузить доступ');
   }
 
-  await loadAccessStudents(accessSearch.trim());
+  await loadAccessStudents(accessSearch.trim(), generation);
 }
 
-async function loadAccessStudents(query) {
+async function loadAccessStudents(query, generation = accessGeneration) {
+  if (generation !== accessGeneration || !accessRoom) return;
   const request = ++accessRequest;
   accessLoading = true;
   renderAccessList();
 
   try {
     let students = await usersApi.students(query);
-    if (request !== accessRequest) return;
+    if (request !== accessRequest || generation !== accessGeneration) return;
     if (!query) {
       const shown = new Set(students.map((student) => student.id));
       students = [
@@ -694,9 +760,12 @@ async function loadAccessStudents(query) {
       ];
     }
     accessStudents = students;
-    els.accessError.hidden = true;
+    if (!accessLoadFailed) {
+      els.accessError.hidden = true;
+      els.accessError.textContent = '';
+    }
   } catch (error) {
-    if (request !== accessRequest) return;
+    if (request !== accessRequest || generation !== accessGeneration) return;
     if (error.status === 401) {
       handlers.onSessionLost();
       return;
@@ -704,7 +773,7 @@ async function loadAccessStudents(query) {
     accessStudents = [];
     showFormError(els.accessError, error.message || 'Не удалось найти учеников');
   } finally {
-    if (request === accessRequest) {
+    if (request === accessRequest && generation === accessGeneration) {
       accessLoading = false;
       renderAccessList();
     }
@@ -746,7 +815,7 @@ function updateAccessCount() {
 }
 
 async function saveAccess() {
-  if (!accessRoom) return;
+  if (!accessRoom || !accessReady) return;
   els.accessSave.disabled = true;
   els.accessError.hidden = true;
   try {
@@ -771,7 +840,9 @@ async function saveAccess() {
 /* ------------------------------------------------------------- admin users */
 
 async function loadAdminData({ silent = false } = {}) {
+  const request = ++adminDataRequest;
   adminDataLoading = true;
+  adminDataError = '';
   if (page === 'users') renderUsersPage();
   else renderTip();
 
@@ -780,6 +851,7 @@ async function loadAdminData({ silent = false } = {}) {
       adminApi.listUsers({}),
       adminApi.listUsers({ status: 'pending' }),
     ]);
+    if (request !== adminDataRequest) return;
     userCounts = {
       all: all.length,
       pending: pending.length,
@@ -788,12 +860,15 @@ async function loadAdminData({ silent = false } = {}) {
     };
     pendingTotal = pending.length;
   } catch (error) {
+    if (request !== adminDataRequest) return;
     if (error.status === 401) {
       handlers.onSessionLost();
       return;
     }
-    if (!silent) showToast(error.message || 'Не удалось загрузить пользователей');
+    adminDataError = error.message || 'Не удалось загрузить заявки';
+    if (!silent) showToast(adminDataError);
   } finally {
+    if (request !== adminDataRequest) return;
     adminDataLoading = false;
     renderShell();
     if (page === 'users') renderUsersPage();
@@ -802,21 +877,26 @@ async function loadAdminData({ silent = false } = {}) {
 
 async function loadUserRows({ silent = false } = {}) {
   if (!isAdmin()) return;
+  const request = ++userRowsRequest;
   userRowsLoading = true;
   if (page === 'users') renderUserRows();
 
   try {
-    users = await adminApi.listUsers({
+    const rows = await adminApi.listUsers({
       status: userFilter === 'all' ? '' : userFilter,
       q: userSearch.trim(),
     });
+    if (request !== userRowsRequest) return;
+    users = rows;
   } catch (error) {
+    if (request !== userRowsRequest) return;
     if (error.status === 401) {
       handlers.onSessionLost();
       return;
     }
     if (!silent) showToast(error.message || 'Не удалось загрузить пользователей');
   } finally {
+    if (request !== userRowsRequest) return;
     userRowsLoading = false;
     if (page === 'users') renderUserRows();
   }
@@ -929,6 +1009,11 @@ function userRow(user) {
   if (user.role !== 'admin' && user.status === 'blocked') {
     actions.push(
       `<button type="button" class="btn btn--ghost btn--sm" data-user-action="unblock" data-user-id="${user.id}">Разблокировать</button>`,
+    );
+  }
+  if (user.role !== 'admin' && user.status === 'rejected') {
+    actions.push(
+      `<button type="button" class="btn btn--ghost btn--sm" data-user-action="approve" data-user-id="${user.id}">Восстановить</button>`,
     );
   }
   actions.push(

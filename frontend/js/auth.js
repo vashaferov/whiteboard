@@ -90,6 +90,8 @@ async function submit(event) {
 }
 
 export function showAuth(message = '') {
+  document.querySelectorAll('#dashboard dialog[open]').forEach((dialog) => dialog.close());
+  window.dispatchEvent(new Event('wb:auth'));
   els.root.hidden = false;
   els.statusScreen.hidden = true;
   $('#dashboard').hidden = true;
