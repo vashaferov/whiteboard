@@ -47,9 +47,7 @@ def test_presentations_reject_non_pdf(client: TestClient, login_user) -> None:
     assert response.status_code == 415
 
 
-def test_presentations_reject_too_many_slides(
-    client: TestClient, login_user, settings
-) -> None:
+def test_presentations_reject_too_many_slides(client: TestClient, login_user, settings) -> None:
     teacher = login_user("Учитель", "teacher")
     settings.max_presentation_slides = 1
     response = client.post(

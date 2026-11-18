@@ -1190,9 +1190,11 @@ class RoomManager:
             else:
                 await self._redis.delete(objects_key)
             await self._redis.set(self._seq_key(room.id), room.seq)
-        elif kind == "presentation_slide":
-            await self._write_workspaces(room)
-        elif kind in ("workspace_created", "workspace_renamed", "workspace_reordered"):
+        elif kind == "presentation_slide" or kind in (
+            "workspace_created",
+            "workspace_renamed",
+            "workspace_reordered",
+        ):
             await self._write_workspaces(room)
         elif kind == "workspace_deleted":
             deleted = message.get("workspaceId")

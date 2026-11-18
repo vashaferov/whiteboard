@@ -1325,9 +1325,7 @@ async def _handle_presentation_slide(
     message: PresentationSlide,
 ) -> None:
     if not is_staff(user.role):
-        await manager.send_to(
-            user, _error("forbidden", "Переключать слайды может только учитель")
-        )
+        await manager.send_to(user, _error("forbidden", "Переключать слайды может только учитель"))
         return
     if not await _check_workspace(manager, user, message):
         return
@@ -1372,15 +1370,11 @@ async def _handle_workspace_create(
         return
     if message.kind == PRESENTATION_KIND:
         if not message.slides:
-            await manager.send_to(
-                user, _error("invalid_presentation", "В презентации нет слайдов")
-            )
+            await manager.send_to(user, _error("invalid_presentation", "В презентации нет слайдов"))
             return
         for url in message.slides:
             if not await manager.images.exists(url):
-                await manager.send_to(
-                    user, _error("invalid_presentation", "Слайд не найден")
-                )
+                await manager.send_to(user, _error("invalid_presentation", "Слайд не найден"))
                 return
         workspace = manager.create_workspace(
             room,
