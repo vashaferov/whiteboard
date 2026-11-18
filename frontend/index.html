@@ -272,7 +272,14 @@
       <main class="workspace">
         <aside id="pages-panel" class="pages-panel" aria-label="Страницы"></aside>
 
-        <div id="board" class="board"></div>
+        <div id="board" class="board">
+          <div id="board-stage" class="board__stage"></div>
+          <div id="zoom-controls" class="zoom-controls" role="group" aria-label="Масштаб">
+            <button id="zoom-out" class="zoom-controls__button" type="button" aria-label="Отдалить">−</button>
+            <button id="zoom-reset" class="zoom-controls__value" type="button" title="Вписать доску">100%</button>
+            <button id="zoom-in" class="zoom-controls__button" type="button" aria-label="Приблизить">+</button>
+          </div>
+        </div>
 
         <div
           id="users-resizer"

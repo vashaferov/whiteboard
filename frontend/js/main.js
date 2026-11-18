@@ -15,6 +15,7 @@ const USERS_PANEL_MIN = 200;
 const USERS_PANEL_MAX = 560;
 const USERS_PANEL_DEFAULT = 232;
 const DEFAULT_BOARD = { width: 1600, height: 900 };
+const ZOOM_STEP = 1.25;
 const PALETTE = ['#111827', '#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777'];
 const TOOL_KEYS = {
   b: 'brush',
@@ -160,6 +161,7 @@ async function logout() {
 function cacheElements() {
   els.app = $('#app');
   els.board = $('#board');
+  els.boardStage = $('#board-stage');
   els.pagesPanel = $('#pages-panel');
   els.status = $('#status');
   els.roomTitle = $('#room-title');
@@ -194,6 +196,9 @@ function cacheElements() {
   els.slidePrev = $('#slide-prev');
   els.slideNext = $('#slide-next');
   els.slideCounter = $('#slide-counter');
+  els.zoomOut = $('#zoom-out');
+  els.zoomReset = $('#zoom-reset');
+  els.zoomIn = $('#zoom-in');
   els.widthControl = els.widthRange.closest('.width-control');
   els.textEditor = $('#text-editor');
   els.toast = $('#toast');
@@ -250,7 +255,7 @@ function startRoom({ room, user, permissions, board }) {
   history.replaceState(null, '', `?room=${encodeURIComponent(room.id)}`);
 
   const size = board || DEFAULT_BOARD;
-  state.board = new Board(els.board, {
+  state.board = new Board(els.boardStage, {
     width: size.width,
     height: size.height,
     canEditObject: (object) =>
@@ -290,6 +295,8 @@ function startRoom({ room, user, permissions, board }) {
       updateFramePanel();
       updateLockButton();
     },
+    onViewChange: (percent) => updateZoomControls(percent),
+    onGestureStart: () => state.tools?.cancelOrFinishStroke(),
   });
 
   state.tools = new ToolManager({
@@ -412,6 +419,9 @@ function bindToolbar() {
   els.slidePrev.addEventListener('click', () => requestSlide(-1));
   els.slideNext.addEventListener('click', () => requestSlide(1));
   els.pdfBtn.addEventListener('click', exportPdf);
+  els.zoomOut.addEventListener('click', () => zoomBy(-1));
+  els.zoomIn.addEventListener('click', () => zoomBy(1));
+  els.zoomReset.addEventListener('click', () => state.board?.resetView());
   els.undoBtn.addEventListener('click', requestUndo);
   els.leaveBtn.addEventListener('click', () => leaveRoom('Вы вышли из комнаты'));
   els.lockBtn.addEventListener('click', () => {
@@ -544,6 +554,19 @@ function selectTool(tool) {
     button.classList.toggle('is-active', button.dataset.tool === tool);
   }
   state.tools?.setTool(tool);
+}
+
+function updateZoomControls(percent = 100) {
+  if (!els.zoomReset) return;
+  els.zoomReset.textContent = `${percent}%`;
+  els.zoomOut.disabled = percent <= 50;
+  els.zoomIn.disabled = percent >= 400;
+}
+
+function zoomBy(direction) {
+  if (!state.board) return;
+  const center = { x: els.board.clientWidth / 2, y: els.board.clientHeight / 2 };
+  state.board.zoomAt(direction > 0 ? ZOOM_STEP : 1 / ZOOM_STEP, center);
 }
 
 function updateToolbar() {
@@ -1472,6 +1495,19 @@ function bindKeyboard() {
       return;
     }
     if (event.altKey) return;
+
+    if (['+', '=', '-', '_', '0'].includes(event.key)) {
+      if (!state.board) return;
+      event.preventDefault();
+      if (event.key === '0') {
+        state.board.resetView();
+        return;
+      }
+      const center = { x: els.board.clientWidth / 2, y: els.board.clientHeight / 2 };
+      const factor = event.key === '-' || event.key === '_' ? 1 / ZOOM_STEP : ZOOM_STEP;
+      state.board.zoomAt(factor, center);
+      return;
+    }
 
     const tool = TOOL_KEYS[event.key.toLowerCase()];
     if (tool) {
