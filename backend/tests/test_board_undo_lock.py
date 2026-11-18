@@ -285,7 +285,7 @@ def test_undo_skips_stale_entry(client: TestClient, login_user) -> None:
         assert events[0]["removedIds"] == ["a1"]
 
 
-def test_undo_empty_and_cleared_by_switch(client: TestClient, login_user) -> None:
+def test_undo_empty(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
@@ -297,9 +297,33 @@ def test_undo_empty_and_cleared_by_switch(client: TestClient, login_user) -> Non
 
         sw.send_json(shape("a1"))
         recv_until(tw, "shape_add")
-        flush(sw)
         sw.send_json({"type": "undo"})
-        assert codes(flush(sw)) == ["undo_empty"]
+        assert recv_until(sw, "objects_restored")["removedIds"] == ["a1"]
+
+
+def test_undo_survives_workspace_switch(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    with ws_connect(client, teacher["token"]) as tw:
+        tw.receive_json()
+        barrier(tw)
+        tw.send_json(shape("first"))
+        barrier(tw)
+
+        tw.send_json({"type": "workspace_create", "name": "Вторая"})
+        second = recv_until(tw, "workspace_created")["workspace"]["id"]
+        recv_until(tw, "workspace_state")
+        tw.send_json(shape("second"))
+        barrier(tw)
+
+        tw.send_json({"type": "workspace_switch", "workspaceId": "ws_default"})
+        recv_until(tw, "workspace_state")
+        tw.send_json({"type": "undo"})
+        assert recv_until(tw, "objects_restored")["removedIds"] == ["first"]
+
+        tw.send_json({"type": "workspace_switch", "workspaceId": second})
+        recv_until(tw, "workspace_state")
+        tw.send_json({"type": "undo"})
+        assert recv_until(tw, "objects_restored")["removedIds"] == ["second"]
 
 
 def test_undo_cleared_by_clear(client: TestClient, login_user) -> None:
