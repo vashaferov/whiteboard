@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#2563eb" />
     <title>Онлайн-доска</title>
     <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/dashboard.css" />
     <script src="https://cdn.jsdelivr.net/npm/konva@9/konva.min.js" defer></script>
     <script type="module" src="/js/main.js" defer></script>
   </head>
@@ -80,91 +81,211 @@
     </div>
 
     <!-- Дашборд -->
-    <div id="dashboard" class="dashboard" hidden>
-      <header class="dashboard__header">
-        <div class="dashboard__brand">
-          <span class="logo logo--small">Д</span>
-          <span class="toolbar__title">Онлайн-доска</span>
-        </div>
-        <div class="dashboard__user">
-          <span id="dash-name"></span>
-          <span id="dash-role" class="badge"></span>
-        </div>
-        <button id="logout-btn" class="btn btn--ghost" type="button">Выйти</button>
-      </header>
+    <div id="dashboard" class="db" hidden>
+      <div class="db-shell">
+        <aside class="db-sidebar" aria-label="Основная навигация">
+          <a class="db-brand" href="/" aria-label="Онлайн-доска">
+            <span class="db-brand__mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="13" rx="2.5" />
+                <path d="M7.5 9.5c1.6-1.8 3.2 1.8 4.9 0 1.4-1.5 2.6.4 3.6.8" />
+                <path d="M9 21l3-4 3 4" />
+              </svg>
+            </span>
+            <span class="db-brand__text">
+              <strong>Онлайн-доска</strong>
+              <small>Уроки в реальном времени</small>
+            </span>
+          </a>
 
-      <main class="dashboard__main">
-        <section class="dashboard__section">
-          <div class="dashboard__toolbar">
-            <h2 class="dashboard__title">Комнаты</h2>
-            <button id="create-room" class="btn btn--primary" type="button" hidden>
-              Создать комнату
+          <nav id="db-nav" class="db-nav" aria-label="Разделы"></nav>
+          <div id="db-tip" class="db-tip"></div>
+
+          <div class="db-user">
+            <span id="dash-avatar" class="db-avatar" aria-hidden="true"></span>
+            <span class="db-user__text">
+              <strong id="dash-name"></strong>
+              <small id="dash-role"></small>
+            </span>
+            <button id="logout-btn" class="db-icon-btn" type="button" aria-label="Выйти" title="Выйти">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3" />
+                <path d="M15 8l4 4-4 4" />
+                <path d="M19 12H9" />
+              </svg>
             </button>
           </div>
-          <ul id="dash-rooms" class="room-list"></ul>
-          <p id="dash-empty" class="dashboard__empty" hidden></p>
-          <p id="dash-error" class="login__error" role="alert"></p>
-        </section>
+        </aside>
 
-        <section id="dash-admin" class="dashboard__section dashboard__section--admin" hidden>
-          <div class="dashboard__toolbar">
-            <h2 class="dashboard__title">Администрирование</h2>
-            <div class="admin-tabs">
-              <button id="admin-tab-users" class="auth__tab is-active" type="button">
-                Пользователи
-              </button>
-              <button id="admin-tab-rooms" class="auth__tab" type="button">Комнаты</button>
-              <button id="admin-refresh" class="btn btn--ghost btn--small" type="button">
-                Обновить
-              </button>
+        <main class="db-main">
+          <header class="db-page-head">
+            <div class="db-page-head__text">
+              <p class="db-eyebrow" id="db-eyebrow">Кабинет</p>
+              <h1 id="db-title">Мои комнаты</h1>
+              <p class="db-subtitle" id="db-subtitle"></p>
+            </div>
+            <div class="db-page-actions" id="db-page-actions"></div>
+          </header>
+
+          <div class="db-page-body" id="db-page-body"></div>
+        </main>
+      </div>
+
+      <!-- Создание комнаты -->
+      <dialog id="create-room-dialog" class="db-dialog" aria-labelledby="create-room-title">
+        <div class="db-dialog__inner">
+          <div class="db-dialog__head">
+            <span class="db-dialog__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </span>
+            <div>
+              <h2 id="create-room-title">Новая комната</h2>
+              <p>Комната — это отдельная доска для урока.</p>
             </div>
           </div>
 
-          <div id="admin-users-panel">
-            <div class="admin-filters">
-              <label class="field field--inline">
-                <span>Статус</span>
-                <select id="admin-status-filter">
-                  <option value="">Все</option>
-                  <option value="pending">Заявки</option>
-                  <option value="active">Активные</option>
-                  <option value="blocked">Заблокированные</option>
-                  <option value="rejected">Отклонённые</option>
-                </select>
-              </label>
-              <input
-                id="admin-search"
-                class="access-dialog__search admin-filters__search"
-                type="search"
-                placeholder="Поиск по логину или имени"
-                autocomplete="off"
-              />
+          <form id="create-room-form" novalidate>
+            <label class="db-field">
+              <span>Название</span>
+              <input id="create-room-name" name="name" maxlength="80" autocomplete="off" placeholder="Например: Алгебра, 8 класс" />
+            </label>
+            <p class="db-hint">После создания вы сможете выдать доступ ученикам.</p>
+            <p class="db-form-error" id="create-room-error" role="alert" hidden></p>
+            <div class="db-dialog__actions">
+              <button type="button" class="btn btn--ghost" data-close-dialog="create-room-dialog">Отмена</button>
+              <button type="submit" class="btn btn--primary" id="create-room-submit">Создать комнату</button>
             </div>
-            <ul id="admin-users" class="admin-list"></ul>
+          </form>
+        </div>
+      </dialog>
+
+      <!-- Доступ -->
+      <dialog id="access-dialog" class="db-dialog db-dialog--wide" aria-labelledby="access-title">
+        <div class="db-dialog__inner">
+          <div class="db-dialog__head">
+            <span class="db-dialog__icon db-dialog__icon--violet" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1" />
+                <circle cx="9.5" cy="7" r="3.5" />
+                <path d="M17 11a3 3 0 1 0 0-6" />
+                <path d="M21 19v-1a3.5 3.5 0 0 0-2.5-3.35" />
+              </svg>
+            </span>
+            <div>
+              <h2 id="access-title">Доступ к комнате</h2>
+              <p id="access-subtitle">Отметьте учеников, которым нужно открыть комнату.</p>
+            </div>
           </div>
 
-          <div id="admin-rooms-panel" hidden>
-            <ul id="admin-rooms" class="admin-list"></ul>
+          <label class="db-search db-search--block">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="M20 20l-3.2-3.2" />
+            </svg>
+            <input id="access-search" type="search" placeholder="Найти ученика по имени или логину" autocomplete="off" />
+          </label>
+
+          <div class="db-access-meta">
+            <span id="access-count">Никто не выбран</span>
+            <button id="access-clear" class="db-link" type="button">Снять всех</button>
           </div>
 
-          <p id="admin-error" class="login__error" role="alert"></p>
-        </section>
-      </main>
+          <ul id="access-list" class="db-access-list" aria-label="Ученики"></ul>
+          <p id="access-empty" class="db-empty-inline" hidden>Никого не найдено</p>
+          <p id="access-error" class="db-form-error" role="alert" hidden></p>
 
-      <dialog id="access-dialog" class="access-dialog">
-        <h2 id="access-title" class="access-dialog__title">Доступ к комнате</h2>
-        <input
-          id="access-search"
-          class="access-dialog__search"
-          type="search"
-          placeholder="Поиск ученика по имени или логину"
-          autocomplete="off"
-        />
-        <p id="access-error" class="login__error" role="alert"></p>
-        <ul id="access-list" class="access-list"></ul>
-        <div class="access-dialog__actions">
-          <button id="access-cancel" class="btn btn--ghost" type="button">Отмена</button>
-          <button id="access-save" class="btn btn--primary" type="button">Сохранить</button>
+          <div class="db-dialog__actions">
+            <button type="button" class="btn btn--ghost" data-close-dialog="access-dialog">Отмена</button>
+            <button type="button" class="btn btn--primary" id="access-save">Сохранить</button>
+          </div>
+        </div>
+      </dialog>
+
+      <!-- Переименование -->
+      <dialog id="rename-room-dialog" class="db-dialog" aria-labelledby="rename-room-title">
+        <div class="db-dialog__inner">
+          <div class="db-dialog__head">
+            <span class="db-dialog__icon db-dialog__icon--teal" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" />
+                <path d="M13.5 7.5l3 3" />
+              </svg>
+            </span>
+            <div>
+              <h2 id="rename-room-title">Переименовать комнату</h2>
+              <p>Новое название увидят все, кому открыт доступ.</p>
+            </div>
+          </div>
+
+          <form id="rename-room-form" novalidate>
+            <label class="db-field">
+              <span>Название</span>
+              <input id="rename-room-name" name="name" maxlength="80" autocomplete="off" />
+            </label>
+            <p class="db-form-error" id="rename-room-error" role="alert" hidden></p>
+            <div class="db-dialog__actions">
+              <button type="button" class="btn btn--ghost" data-close-dialog="rename-room-dialog">Отмена</button>
+              <button type="submit" class="btn btn--primary" id="rename-room-submit">Сохранить</button>
+            </div>
+          </form>
+        </div>
+      </dialog>
+
+      <!-- Удаление -->
+      <dialog id="delete-room-dialog" class="db-dialog" aria-labelledby="delete-room-title">
+        <div class="db-dialog__inner">
+          <div class="db-dialog__head">
+            <span class="db-dialog__icon db-dialog__icon--danger" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 7h16" />
+                <path d="M9 7V5h6v2" />
+                <path d="M6 7l1 13h10l1-13" />
+                <path d="M10 11v5M14 11v5" />
+              </svg>
+            </span>
+            <div>
+              <h2 id="delete-room-title">Удалить комнату?</h2>
+              <p id="delete-room-text">Все объекты и доступы будут удалены безвозвратно.</p>
+            </div>
+          </div>
+
+          <p class="db-form-error" id="delete-room-error" role="alert" hidden></p>
+          <div class="db-dialog__actions">
+            <button type="button" class="btn btn--ghost" data-close-dialog="delete-room-dialog">Отмена</button>
+            <button type="button" class="btn btn--danger" id="delete-room-confirm">Удалить комнату</button>
+          </div>
+        </div>
+      </dialog>
+
+      <!-- Пароль -->
+      <dialog id="password-dialog" class="db-dialog" aria-labelledby="password-title">
+        <div class="db-dialog__inner">
+          <div class="db-dialog__head">
+            <span class="db-dialog__icon db-dialog__icon--amber" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="5" y="11" width="14" height="9" rx="2" />
+                <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+              </svg>
+            </span>
+            <div>
+              <h2 id="password-title">Новый пароль</h2>
+              <p id="password-text">Задайте пароль не короче 8 символов.</p>
+            </div>
+          </div>
+
+          <form id="password-form" novalidate>
+            <label class="db-field">
+              <span>Пароль</span>
+              <input id="password-value" type="password" minlength="8" maxlength="72" autocomplete="new-password" />
+            </label>
+            <p class="db-form-error" id="password-error" role="alert" hidden></p>
+            <div class="db-dialog__actions">
+              <button type="button" class="btn btn--ghost" data-close-dialog="password-dialog">Отмена</button>
+              <button type="submit" class="btn btn--primary" id="password-submit">Сохранить пароль</button>
+            </div>
+          </form>
         </div>
       </dialog>
     </div>

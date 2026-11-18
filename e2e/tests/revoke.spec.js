@@ -64,9 +64,10 @@ test('access: demoting the owner removes the room and the session', async ({
   });
   expect(demoted.ok()).toBeTruthy();
 
-  await expect(page.locator('#dashboard')).toBeVisible({ timeout: 15_000 });
+  // Sessions are revoked, so the app returns to the login screen immediately.
+  await expect(page.locator('#auth')).toBeVisible({ timeout: 15_000 });
 
-  // Sessions are revoked too: a reload lands on the login screen.
+  // A reload keeps the user on the login screen.
   await page.reload();
   await expect(page.locator('#auth')).toBeVisible({ timeout: 15_000 });
 

@@ -24,12 +24,15 @@ test('rooms: teacher manages rooms and grants access', async ({ browser, request
   await expect(teacher.locator('#dashboard')).toBeVisible();
   await expect(teacher.locator('#create-room')).toBeVisible();
 
-  teacher.once('dialog', (dialog) => dialog.accept('Алгебра'));
   await teacher.click('#create-room');
+  await teacher.fill('#create-room-name', 'Алгебра');
+  await teacher.click('#create-room-submit');
   await expect(teacher.locator('.room-card__name')).toHaveText('Алгебра');
 
-  teacher.once('dialog', (dialog) => dialog.accept('Алгебра 7'));
+  await teacher.locator('.room-card__menu').click();
   await teacher.click('.room-card__rename');
+  await teacher.fill('#rename-room-name', 'Алгебра 7');
+  await teacher.click('#rename-room-submit');
   await expect(teacher.locator('.room-card__name')).toHaveText('Алгебра 7');
 
   await signInWith(request, student, studentLogin);
@@ -53,8 +56,9 @@ test('rooms: teacher manages rooms and grants access', async ({ browser, request
   await expect(student.locator('.room-card__access')).toHaveCount(0);
   await expect(student.locator('.room-card__delete')).toHaveCount(0);
 
-  teacher.once('dialog', (dialog) => dialog.accept());
+  await teacher.locator('.room-card__menu').click();
   await teacher.click('.room-card__delete');
+  await teacher.click('#delete-room-confirm');
   await expect(teacher.locator('.room-card')).toHaveCount(0);
 
   await student.reload();
