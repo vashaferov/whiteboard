@@ -116,10 +116,8 @@ PRESENTATION_ALLOWED = {
 }
 
 
-def _locked_for(user: ConnectedUser, room: Room, obj: dict[str, Any]) -> bool:
-    """A student may not change an object locked directly or through its frame."""
-    if is_staff(user.role):
-        return False
+def _locked_for(room: Room, obj: dict[str, Any]) -> bool:
+    """A locked object and the children of a locked frame reject every edit."""
     if obj.get("locked"):
         return True
     frame_id = obj.get("frameId")
@@ -222,7 +220,7 @@ def _attach_to_frame(room: Room, obj: dict[str, Any], user: ConnectedUser) -> st
             continue
         if candidate.get("workspaceId") != obj.get("workspaceId"):
             continue
-        if _locked_for(user, room, candidate):
+        if _locked_for(room, candidate):
             continue
         if not _frame_contains(candidate, anchor):
             continue
@@ -239,7 +237,7 @@ def _capture_into_frame(
     room: Room, frame: dict[str, Any], user: ConnectedUser
 ) -> tuple[list[str], dict[str, Any]]:
     """Capture free objects inside a frame; return their ids and previous ``frameId``s."""
-    if _locked_for(user, room, frame):
+    if _locked_for(room, frame):
         return [], {}
     captured: list[str] = []
     previous: dict[str, Any] = {}
@@ -250,7 +248,7 @@ def _capture_into_frame(
             continue
         if obj.get("workspaceId") != frame.get("workspaceId"):
             continue
-        if _locked_for(user, room, obj):
+        if _locked_for(room, obj):
             continue
         anchor = _object_anchor(obj)
         if anchor is None or not _frame_contains(frame, anchor):
@@ -756,8 +754,8 @@ async def _handle_frame_move(
     if obj.get("type") != "frame":
         await manager.send_to(user, _error("invalid_message", "Объект не является фреймом"))
         return
-    if _locked_for(user, room, obj) or any(
-        _locked_for(user, room, child)
+    if _locked_for(room, obj) or any(
+        _locked_for(room, child)
         for child in room.objects
         if child.get("frameId") == obj["id"]
     ):
@@ -821,7 +819,7 @@ async def _handle_frame_style(
     if obj.get("type") != "frame":
         await manager.send_to(user, _error("invalid_message", "Объект не является фреймом"))
         return
-    if _locked_for(user, room, obj):
+    if _locked_for(room, obj):
         await manager.send_to(user, _error("locked", "Элемент заблокирован учителем"))
         return
     if not _can_edit_object(user, obj):
@@ -924,7 +922,7 @@ async def _handle_object_update(
     obj = await _check_object_workspace(manager, room, user, message)
     if obj is None:
         return
-    if _locked_for(user, room, obj):
+    if _locked_for(room, obj):
         await manager.send_to(user, _error("locked", "Элемент заблокирован учителем"))
         return
     if not _can_edit_object(user, obj):
@@ -958,10 +956,10 @@ async def _handle_object_transform(
     obj = await _check_object_workspace(manager, room, user, message)
     if obj is None:
         return
-    if _locked_for(user, room, obj) or (
+    if _locked_for(room, obj) or (
         obj.get("type") == "frame"
         and any(
-            _locked_for(user, room, child)
+            _locked_for(room, child)
             for child in room.objects
             if child.get("frameId") == obj["id"]
         )
@@ -1038,7 +1036,7 @@ async def _handle_text_update(
     if obj.get("type") != "text" and not is_block:
         await manager.send_to(user, _error("not_text", "Объект не является текстом"))
         return
-    if _locked_for(user, room, obj):
+    if _locked_for(room, obj):
         await manager.send_to(user, _error("locked", "Элемент заблокирован учителем"))
         return
     if not _can_edit_object(user, obj):
@@ -1077,7 +1075,7 @@ async def _handle_text_font(
     if obj.get("type") != "text":
         await manager.send_to(user, _error("not_text", "Объект не является текстом"))
         return
-    if _locked_for(user, room, obj):
+    if _locked_for(room, obj):
         await manager.send_to(user, _error("locked", "Объект заблокирован учителем"))
         return
     if not _can_edit_object(user, obj):
@@ -1107,11 +1105,11 @@ async def _handle_object_delete(
     obj = await _check_object_workspace(manager, room, user, message)
     if obj is None:
         return
-    if _locked_for(user, room, obj):
+    if _locked_for(room, obj):
         await manager.send_to(user, _error("locked", "Элемент заблокирован учителем"))
         return
     if obj.get("type") == "frame" and any(
-        _locked_for(user, room, child)
+        _locked_for(room, child)
         for child in room.objects
         if child.get("frameId") == obj["id"]
     ):
@@ -1222,7 +1220,9 @@ def _undo_fields_apply(user: ConnectedUser, room: Room, entry: dict[str, Any]) -
         obj = room.get_object(object_id)
         if obj is None:
             continue
-        if _locked_for(user, room, obj):
+        if _locked_for(room, obj) and not (
+            is_staff(user.role) and set(patch) <= {"locked"}
+        ):
             return False
         targets.append((obj, patch))
     if not targets:
@@ -1238,14 +1238,14 @@ def _undo_created_apply(user: ConnectedUser, room: Room, entry: dict[str, Any]) 
     if not targets:
         return None
     field_targets = [room.get_object(object_id) for object_id in (entry.get("fields") or {})]
-    if any(target is not None and _locked_for(user, room, target) for target in field_targets):
+    if any(target is not None and _locked_for(room, target) for target in field_targets):
         return None
     removed: list[str] = []
     for obj in targets:
-        if _locked_for(user, room, obj):
+        if _locked_for(room, obj):
             return None
         if obj.get("type") == "frame" and any(
-            child.get("frameId") == obj["id"] and _locked_for(user, room, child)
+            child.get("frameId") == obj["id"] and _locked_for(room, child)
             for child in room.objects
         ):
             return None

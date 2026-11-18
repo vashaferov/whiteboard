@@ -266,18 +266,19 @@ function startRoom({ room, user, permissions, board }) {
     height: size.height,
     canEditObject: (object) =>
       Boolean(state.user) &&
-      (isStaff(state.user.role) || (!lockedFor(object) && object.author === state.user.id)),
+      !lockedFor(object) &&
+      (isStaff(state.user.role) || object.author === state.user.id),
     canDeleteObject: (object) => {
-      if (!state.user) return false;
-      if (isStaff(state.user.role)) return true;
-      if (lockedFor(object) || object.author !== state.user.id) return false;
+      if (!state.user || lockedFor(object)) return false;
       if (object.type === 'frame' && state.board) {
         for (const entry of state.board.objects.values()) {
           if (entry.data.frameId !== object.id) continue;
-          if (lockedFor(entry.data) || entry.data.author !== state.user.id) return false;
+          if (lockedFor(entry.data)) return false;
+          if (!isStaff(state.user.role) && entry.data.author !== state.user.id) return false;
         }
       }
-      return true;
+      if (isStaff(state.user.role)) return true;
+      return object.author === state.user.id;
     },
     onObjectMove: (objectId, x, y) => {
       sendWorkspace({
@@ -490,7 +491,7 @@ function updateFontControl() {
 }
 
 function lockedFor(object) {
-  if (!object || !state.user || isStaff(state.user.role)) return false;
+  if (!object) return false;
   if (object.locked) return true;
   if (!object.frameId) return false;
   return Boolean(state.board?.getObjectData(object.frameId)?.locked);

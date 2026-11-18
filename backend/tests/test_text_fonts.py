@@ -66,7 +66,11 @@ def test_font_change_permissions_and_broadcast(client: TestClient, login_user) -
         recv_until(sw, "object_lock")
         sw.send_json({"type": "text_font", "objectId": "t1", "fontFamily": "narrow"})
         assert "locked" in codes(barrier(sw))
+        tw.send_json({"type": "text_font", "objectId": "t1", "fontFamily": "narrow"})
+        assert "locked" in codes(barrier(tw))
 
+        tw.send_json({"type": "object_lock", "objectId": "t1", "locked": False})
+        recv_until(sw, "object_lock")
         tw.send_json({"type": "text_font", "objectId": "t1", "fontFamily": "narrow"})
         assert recv_until(sw, "text_font")["fontFamily"] == "narrow"
 
