@@ -38,6 +38,7 @@ from app.models.schemas import (
     TextFont,
     TextUpdate,
     Undo,
+    WorkspaceCanvas,
     WorkspaceCreate,
     WorkspaceDelete,
     WorkspaceMoveAck,
@@ -486,6 +487,8 @@ async def _handle_message(
         await _handle_text_font(manager, room, user, message)
     elif isinstance(message, BoardResize):
         await _handle_board_resize(manager, room, user, message)
+    elif isinstance(message, WorkspaceCanvas):
+        await _handle_workspace_canvas(manager, room, user, message)
     elif isinstance(message, ObjectDelete):
         await _handle_object_delete(manager, room, user, message)
     elif isinstance(message, ObjectLock):
@@ -1411,6 +1414,47 @@ async def _handle_kick(
         await manager.send_to(user, _error("user_not_found", "Участник не найден"))
         return
     manager.clear_history(room, message.clientId)
+
+
+async def _handle_workspace_canvas(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: WorkspaceCanvas,
+) -> None:
+    if not is_staff(user.role):
+        await manager.send_to(user, _error("forbidden", "Менять холст может только учитель"))
+        return
+    if not await _check_workspace(manager, user, message):
+        return
+    workspace = room.get_workspace(user.workspace_id)
+    if workspace is None or workspace.get("kind") == PRESENTATION_KIND:
+        await manager.send_to(user, _error("invalid_message", "Холст презентации задаёт слайд"))
+        return
+    canvas = None
+    if message.mode == "fixed":
+        if message.width is None or message.height is None:
+            await manager.send_to(user, _error("invalid_message", "Укажите ширину и высоту"))
+            return
+        ratio = max(message.width / message.height, message.height / message.width)
+        if ratio > 4:
+            await manager.send_to(user, _error("invalid_message", "Слишком вытянутый холст"))
+            return
+        canvas = {"mode": "fixed", "width": message.width, "height": message.height}
+    if canvas is None:
+        workspace.pop("canvas", None)
+    else:
+        workspace["canvas"] = canvas
+    manager.mark_dirty(room)
+    await manager.broadcast(
+        room,
+        {
+            "type": "workspace_canvas",
+            "workspaceId": user.workspace_id,
+            "canvas": canvas,
+        },
+        workspace_id=user.workspace_id,
+    )
 
 
 async def _handle_workspace_switch(
