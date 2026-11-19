@@ -122,7 +122,7 @@ async function uploadImage(page) {
     .toBe(1);
 }
 
-test('eraser: removes only brush strokes', async ({ browser, request }) => {
+test('eraser: removes strokes, shapes, text and images', async ({ browser, request }) => {
   const setup = await lessonSetup(request, { name: 'Eraser' });
   const context = await browser.newContext();
   const teacher = await context.newPage();
@@ -143,28 +143,28 @@ test('eraser: removes only brush strokes', async ({ browser, request }) => {
   await eraseAt(teacher, { x: 220, y: 700 });
   await expect.poll(() => objectCount(teacher)).toBe(0);
 
-  // Rectangle: the eraser leaves it intact.
+  // Rectangle: the eraser removes it.
   await drawRect(teacher, { x: 220, y: 220 }, { x: 340, y: 320 });
   await expect.poll(() => objectCount(teacher)).toBe(1);
   await teacher.click('[data-tool="eraser"]');
   await eraseAt(teacher, { x: 280, y: 270 });
-  await expect.poll(() => objectCount(teacher)).toBe(1);
+  await expect.poll(() => objectCount(teacher)).toBe(0);
 
-  // Text: the eraser leaves it intact.
+  // Text: the eraser removes it.
   await teacher.click('[data-tool="text"]');
   await clickWorld(teacher, { x: 800, y: 600 });
   await teacher.fill('#text-editor', 'Стереть меня');
   await teacher.press('#text-editor', 'Enter');
-  await expect.poll(() => objectCount(teacher)).toBe(2);
+  await expect.poll(() => objectCount(teacher)).toBe(1);
   await teacher.click('[data-tool="eraser"]');
-  await eraseAt(teacher, { x: 830, y: 608 });
-  await expect.poll(() => objectCount(teacher)).toBe(2);
+  await eraseAt(teacher, { x: 810, y: 606 });
+  await expect.poll(() => objectCount(teacher)).toBe(0);
 
-  // Image: the eraser leaves it intact.
+  // Image: the eraser removes it.
   await uploadImage(teacher);
   await teacher.click('[data-tool="eraser"]');
   await eraseAt(teacher, { x: 800, y: 450 });
-  await expect.poll(() => objectCount(teacher)).toBe(3);
+  await expect.poll(() => objectCount(teacher)).toBe(0);
 
   await context.close();
 });
@@ -456,7 +456,7 @@ test('frames: dragging a child out detaches it and resize keeps children', async
   await context.close();
 });
 
-test('frames: the eraser leaves a frame with foreign content intact', async ({
+test('frames: the eraser respects foreign content and removes an own frame by its border', async ({
   browser,
   request,
 }) => {
@@ -478,12 +478,6 @@ test('frames: the eraser leaves a frame with foreign content intact', async ({
 
   await teacher.click('[data-tool="eraser"]');
   await eraseAt(teacher, { x: 150, y: 300 });
-  await expect.poll(() => objectCount(teacher)).toBe(2);
-
-  await teacher.click('[data-tool="select"]');
-  await clickWorld(teacher, { x: 150, y: 300 });
-  teacher.once('dialog', (dialog) => dialog.accept());
-  await teacher.keyboard.press('Delete');
   await expect.poll(() => objectCount(teacher)).toBe(0);
   await expect.poll(() => objectCount(student)).toBe(0);
 
@@ -491,7 +485,7 @@ test('frames: the eraser leaves a frame with foreign content intact', async ({
   await studentContext.close();
 });
 
-test('eraser: leaves a block and its arrows; delete removes them', async ({
+test('eraser: removes a block together with its arrows', async ({
   browser,
   request,
 }) => {
@@ -508,21 +502,6 @@ test('eraser: leaves a block and its arrows; delete removes them', async ({
 
   await teacher.click('[data-tool="eraser"]');
   await eraseAt(teacher, { x: 280, y: 250 });
-  await expect.poll(() => objectCount(teacher)).toBe(3);
-
-  // Let Konva's double-click window pass: the eraser tap and the selection
-  // click are different points, but Konva only checks the time between taps.
-  await teacher.waitForTimeout(500);
-  await teacher.click('[data-tool="select"]');
-  await clickWorld(teacher, { x: 203, y: 250 });
-  await expect
-    .poll(() =>
-      teacher.evaluate(
-        () => window.Konva.stages[0].findOne('Transformer')?.nodes()[0]?.id() ?? null,
-      ),
-    )
-    .not.toBeNull();
-  await teacher.keyboard.press('Delete');
   await expect.poll(() => objectCount(teacher)).toBe(1);
 
   await context.close();

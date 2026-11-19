@@ -288,18 +288,7 @@ function startRoom({ room, user, permissions, board }) {
       Boolean(state.user) &&
       !lockedFor(object) &&
       (isStaff(state.user.role) || object.author === state.user.id),
-    canDeleteObject: (object) => {
-      if (!state.user || lockedFor(object)) return false;
-      if (object.type === 'frame' && state.board) {
-        for (const entry of state.board.objects.values()) {
-          if (entry.data.frameId !== object.id) continue;
-          if (lockedFor(entry.data)) return false;
-          if (!isStaff(state.user.role) && entry.data.author !== state.user.id) return false;
-        }
-      }
-      if (isStaff(state.user.role)) return true;
-      return object.author === state.user.id;
-    },
+    canDeleteObject,
     onObjectMove: (objectId, x, y) => {
       sendWorkspace({
         type: 'object_update',
@@ -307,6 +296,9 @@ function startRoom({ room, user, permissions, board }) {
         x: round(x),
         y: round(y),
       });
+    },
+    onObjectsMove: (updates) => {
+      sendWorkspace({ type: 'objects_move', updates });
     },
     onObjectTransform: (objectId, data) => {
       sendWorkspace({
@@ -495,6 +487,19 @@ function canEditObject(object) {
     Boolean(state.user) &&
     (isStaff(state.user.role) || (!lockedFor(object) && object.author === state.user.id))
   );
+}
+
+function canDeleteObject(object) {
+  if (!state.user || lockedFor(object)) return false;
+  if (object.type === 'frame' && state.board) {
+    for (const entry of state.board.objects.values()) {
+      if (entry.data.frameId !== object.id) continue;
+      if (lockedFor(entry.data)) return false;
+      if (!isStaff(state.user.role) && entry.data.author !== state.user.id) return false;
+    }
+  }
+  if (isStaff(state.user.role)) return true;
+  return object.author === state.user.id;
 }
 
 function updateFontControl() {
@@ -1748,7 +1753,7 @@ function bindKeyboard() {
       }
     }
     if (event.ctrlKey || event.metaKey) {
-      if (event.key.toLowerCase() === 'z') {
+      if (event.code === 'KeyZ' && !event.shiftKey) {
         event.preventDefault();
         requestUndo();
       }
@@ -1786,27 +1791,45 @@ function bindKeyboard() {
     }
 
     if (event.key === 'Delete' || event.key === 'Backspace') {
-      const selectedId = state.board?.getSelectedId();
-      if (!selectedId) return;
+      const ids = state.board?.getSelectedIds?.() ?? [];
+      if (!ids.length) return;
       event.preventDefault();
       if (!state.permissions.canDelete) {
         toast('Удалять объекты может только учитель');
         return;
       }
-      const object = state.board.getObjectData(selectedId);
+      const objects = ids
+        .map((id) => state.board.getObjectData(id))
+        .filter(Boolean);
+      if (objects.some((object) => !canDeleteObject(object))) {
+        toast('Некоторые выбранные элементы удалить нельзя');
+        return;
+      }
+      if (ids.length > 1) {
+        if (
+          objects.some((object) => object.type === 'frame') &&
+          !window.confirm('Удалить выбранные элементы вместе с содержимым?')
+        ) {
+          return;
+        }
+        state.board.removeObjects(ids);
+        sendWorkspace({ type: 'objects_delete', objectIds: ids });
+        return;
+      }
+      const object = objects[0];
       if (
         object?.type === 'frame' &&
         !window.confirm('Удалить фрейм и всё содержимое?')
       ) {
         return;
       }
-      state.board.removeObject(selectedId);
-      sendWorkspace({ type: 'object_delete', objectId: selectedId });
+      state.board.removeObject(ids[0]);
+      sendWorkspace({ type: 'object_delete', objectId: ids[0] });
       return;
     }
 
     if (event.key === 'Escape') {
-      state.board?.selectObject(null);
+      state.board?.selectObjects([]);
     }
   });
 }

@@ -290,6 +290,22 @@ class ObjectTransform(_Message):
     fontSize: float | None = Field(default=None, ge=8, le=200)
 
 
+class MoveEntry(BaseModel):
+    objectId: str = Field(pattern=OBJECT_ID_PATTERN)
+    x: float = Field(ge=COORD_MIN, le=COORD_MAX)
+    y: float = Field(ge=COORD_MIN, le=COORD_MAX)
+
+
+class ObjectsDelete(_Message):
+    type: Literal["objects_delete"]
+    objectIds: list[str] = Field(min_length=1, max_length=200)
+
+
+class ObjectsMove(_Message):
+    type: Literal["objects_move"]
+    updates: list[MoveEntry] = Field(min_length=1, max_length=200)
+
+
 class BoardResize(_Message):
     type: Literal["board_resize"]
     width: int = Field(ge=640, le=4000)
@@ -459,6 +475,8 @@ ClientMessage = Annotated[
     | TextFont
     | BoardResize
     | WorkspaceCanvas
+    | ObjectsDelete
+    | ObjectsMove
     | ObjectDelete
     | ObjectLock
     | Undo

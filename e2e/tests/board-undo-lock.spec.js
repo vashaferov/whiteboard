@@ -46,10 +46,10 @@ test('eraser: removes brush strokes and leaves other objects', async ({ browser,
   await expect.poll(() => objectCount(page)).toBe(3);
 
   await eraseAt(page, { x: 450, y: 330 }, { x: 480, y: 350 });
-  await expect.poll(() => objectCount(page)).toBe(3);
+  await expect.poll(() => objectCount(page)).toBe(2);
 
   await eraseAt(page, { x: 120, y: 95 }, { x: 280, y: 95 });
-  await expect.poll(() => objectCount(page)).toBe(2);
+  await expect.poll(() => objectCount(page)).toBe(1);
 
   await context.close();
 });
@@ -194,6 +194,27 @@ test('undo: removes a created shape and restores an erased stroke', async ({ bro
     await teacherContext.close();
     await studentContext.close();
   }
+});
+
+test('undo: ctrl+z works with a Cyrillic keyboard layout', async ({ page, request }) => {
+  const setup = await lessonSetup(request, { name: 'Undo layout', student: false });
+  await signInWith(request, page, setup.teacherLogin);
+  await openRoom(page, setup.room.id);
+  await drawRect(page, { x: 720, y: 400 }, { x: 900, y: 520 });
+  await expect.poll(() => objectCount(page)).toBe(1);
+
+  await page.evaluate(() => {
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'я',
+        code: 'KeyZ',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await expect.poll(() => objectCount(page)).toBe(0);
 });
 
 test('undo: ctrl+z restores a moved object and empty history toasts', async ({ browser, request }) => {

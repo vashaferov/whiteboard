@@ -72,6 +72,7 @@ export class Board {
     this.canvasMode = 'infinite';
     this.presentation = false;
     this.onObjectMove = options.onObjectMove ?? (() => {});
+    this.onObjectsMove = options.onObjectsMove ?? (() => {});
     this.onObjectTransform = options.onObjectTransform ?? (() => {});
     this.onEditText = options.onEditText ?? (() => {});
     this.editPredicate = options.canEditObject ?? (() => false);
@@ -84,6 +85,11 @@ export class Board {
     this.offsetY = 0;
     this.selectMode = false;
     this.selectedId = null;
+    this.selectedIds = new Set();
+    this.lassoMode = false;
+    this.lassoDrag = null;
+    this.lassoNode = null;
+    this.groupDrag = null;
     this.destroyed = false;
 
     this.stage = new Konva.Stage({
@@ -395,6 +401,7 @@ export class Board {
   }
 
   _startGesture() {
+    this._hideLasso();
     const [first, second] = [...this.pointers.values()];
     const mid = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
     this.gesture = {
@@ -409,6 +416,10 @@ export class Board {
   }
 
   _trackPointerMove(event) {
+    if (this.lassoDrag && this.lassoDrag.id === event.pointerId) {
+      this._updateLasso(event);
+      return;
+    }
     if (this.panDrag && this.panDrag.id === event.pointerId) {
       const drag = this.panDrag;
       const dx = event.clientX - drag.startX;
@@ -442,6 +453,9 @@ export class Board {
   }
 
   _trackPointerUp(event) {
+    if (this.lassoDrag && this.lassoDrag.id === event.pointerId) {
+      this._finishLasso(event);
+    }
     if (this.panDrag && this.panDrag.id === event.pointerId) {
       this.container.releasePointerCapture?.(event.pointerId);
       this.container.classList.remove('is-panning');
@@ -1414,18 +1428,34 @@ export class Board {
 
   setSelectMode(enabled) {
     this.selectMode = enabled;
-    if (!enabled) this.selectObject(null);
+    if (!enabled && !this.lassoMode) this.selectObjects([]);
     this.container.classList.toggle(
       'is-pannable',
-      enabled && (this.canvasMode === 'infinite' || this.zoom > 1),
+      enabled && !this.lassoMode && (this.canvasMode === 'infinite' || this.zoom > 1),
     );
     for (const entry of this.objects.values()) this._applyDraggable(entry);
   }
 
-  selectObject(objectId) {
-    this.selectedId = objectId;
-    const entry = objectId ? this.objects.get(objectId) : null;
-    if (entry) {
+  setLassoMode(enabled) {
+    const wasLasso = this.lassoMode;
+    this.lassoMode = Boolean(enabled);
+    if (this.lassoMode) this.selectMode = true;
+    if (!this.lassoMode) this._hideLasso();
+    if (!this.lassoMode && wasLasso && !this.selectMode) this.selectObjects([]);
+    this.container.classList.toggle(
+      'is-pannable',
+      !this.lassoMode && this.selectMode && (this.canvasMode === 'infinite' || this.zoom > 1),
+    );
+    for (const entry of this.objects.values()) this._applyDraggable(entry);
+  }
+
+  selectObjects(ids) {
+    const unique = [...new Set(ids)].filter((id) => this.objects.has(id));
+    this.selectedIds = new Set(unique);
+    this.selectedId = unique[unique.length - 1] ?? null;
+    const nodes = unique.map((id) => this.objects.get(id).node);
+    if (nodes.length === 1) {
+      const entry = this.objects.get(unique[0]);
       const data = entry.data;
       const isBlock = data.type === 'shape' && FLOW_SHAPES.has(data.shapeType);
       const transformable = data.type !== 'stroke' && data.type !== 'connector';
@@ -1434,18 +1464,127 @@ export class Board {
       this.transformer.rotateEnabled(
         transformable && editable && !isBlock && data.type !== 'frame',
       );
-      this.transformer.nodes([entry.node]);
-      this.transformer.moveToTop();
-      this.transformer.forceUpdate();
     } else {
-      this.transformer.nodes([]);
+      this.transformer.resizeEnabled(false);
+      this.transformer.rotateEnabled(false);
     }
-    this.onSelectObject?.(objectId);
+    this.transformer.nodes(nodes);
+    if (nodes.length) this.transformer.moveToTop();
+    this.transformer.forceUpdate();
+    for (const entry of this.objects.values()) this._applyDraggable(entry);
+    this.onSelectObject?.(this.selectedId);
     this.contentLayer.batchDraw();
+  }
+
+  selectObject(objectId) {
+    this.selectObjects(objectId ? [objectId] : []);
   }
 
   getSelectedId() {
     return this.selectedId;
+  }
+
+  getSelectedIds() {
+    return [...this.selectedIds];
+  }
+
+  removeObjects(ids) {
+    this.selectObjects([]);
+    for (const id of ids) this.removeObject(id);
+    this.contentLayer.batchDraw();
+  }
+
+  _hideLasso() {
+    this.lassoDrag = null;
+    this.lassoNode?.destroy();
+    this.lassoNode = null;
+    this.overlayLayer.batchDraw();
+  }
+
+  _worldFromClient(clientX, clientY) {
+    const box = this.container.getBoundingClientRect();
+    const screen = { x: clientX - box.left, y: clientY - box.top };
+    return this.stage.getAbsoluteTransform().copy().invert().point(screen);
+  }
+
+  _startLasso(native) {
+    const point = this._worldFromClient(native.clientX, native.clientY);
+    this.lassoDrag = { id: native.pointerId, start: point, end: point };
+    this.container.setPointerCapture?.(native.pointerId);
+    if (!this.lassoNode) {
+      this.lassoNode = new Konva.Rect({
+        fill: 'rgba(37, 99, 235, 0.08)',
+        stroke: '#2563eb',
+        strokeWidth: 1,
+        dash: [6, 4],
+        listening: false,
+        strokeScaleEnabled: false,
+      });
+      this.overlayLayer.add(this.lassoNode);
+    }
+    this._drawLasso();
+  }
+
+  _updateLasso(event) {
+    if (!this.lassoDrag) return;
+    this.lassoDrag.end = this._worldFromClient(event.clientX, event.clientY);
+    this._drawLasso();
+  }
+
+  _drawLasso() {
+    if (!this.lassoDrag || !this.lassoNode) return;
+    const { start, end } = this.lassoDrag;
+    this.lassoNode.position({ x: Math.min(start.x, end.x), y: Math.min(start.y, end.y) });
+    this.lassoNode.size({
+      width: Math.abs(end.x - start.x),
+      height: Math.abs(end.y - start.y),
+    });
+    this.overlayLayer.batchDraw();
+  }
+
+  _finishLasso(event) {
+    if (!this.lassoDrag) return;
+    if (event) this._updateLasso(event);
+    const { start, end } = this.lassoDrag;
+    const rect = {
+      x: Math.min(start.x, end.x),
+      y: Math.min(start.y, end.y),
+      width: Math.abs(end.x - start.x),
+      height: Math.abs(end.y - start.y),
+    };
+    this.container.releasePointerCapture?.(this.lassoDrag.id);
+    this._hideLasso();
+    if (rect.width < 3 && rect.height < 3) {
+      this.selectObjects([]);
+      return;
+    }
+    const ids = [];
+    for (const [id, entry] of this.objects) {
+      if (!(entry.node instanceof Konva.Group)) continue;
+      if (!this.editPredicate(entry.data, entry.node)) continue;
+      const bounds = entry.node.getClientRect({ relativeTo: this.contentLayer });
+      if (this._rectsIntersect(rect, bounds)) ids.push(id);
+    }
+    this.selectObjects(this._dropFrameChildren(ids));
+  }
+
+  _rectsIntersect(left, right) {
+    return !(
+      left.x + left.width < right.x ||
+      right.x + right.width < left.x ||
+      left.y + left.height < right.y ||
+      right.y + right.height < left.y
+    );
+  }
+
+  _dropFrameChildren(ids) {
+    const frames = new Set(
+      ids.filter((id) => this.objects.get(id)?.data.type === 'frame'),
+    );
+    return ids.filter((id) => {
+      const frameId = this.objects.get(id)?.data.frameId;
+      return !(frameId && frames.has(frameId));
+    });
   }
 
   objectIdAt(point) {
@@ -1462,7 +1601,6 @@ export class Board {
   eraseAt(point, radius) {
     const ids = [];
     for (const [id, entry] of [...this.objects.entries()]) {
-      if (entry.data.type !== 'stroke') continue;
       if (!this.deletePredicate(entry.data)) continue;
       if (this._isErased(entry, point, radius)) ids.push(id);
     }
@@ -1556,14 +1694,75 @@ export class Board {
     return best;
   }
 
+  _moveGroupDrag() {
+    const drag = this.groupDrag;
+    if (!drag) return;
+    const dragged = this.objects.get(drag.draggedId);
+    const origin = drag.starts[drag.draggedId];
+    if (!dragged || !origin) return;
+    const dx = dragged.node.x() - origin.x;
+    const dy = dragged.node.y() - origin.y;
+    for (const [id, start] of Object.entries(drag.starts)) {
+      if (id === drag.draggedId) continue;
+      const entry = this.objects.get(id);
+      if (!entry) continue;
+      entry.node.position({ x: start.x + dx, y: start.y + dy });
+      if (entry.data.type === 'shape' && FLOW_SHAPES.has(entry.data.shapeType)) {
+        this._updateConnectorsFor(id);
+      }
+    }
+    this.contentLayer.batchDraw();
+  }
+
+  _endGroupDrag() {
+    const drag = this.groupDrag;
+    if (!drag) return;
+    const updates = [];
+    for (const [id] of Object.entries(drag.starts)) {
+      const entry = this.objects.get(id);
+      if (!entry) continue;
+      const position = entry.node.position();
+      entry.data.x = position.x;
+      entry.data.y = position.y;
+      if (entry.data.type !== 'frame') entry.data.frameId = this._frameFor(entry.data);
+      if (entry.data.type === 'shape' && FLOW_SHAPES.has(entry.data.shapeType)) {
+        this._updateConnectorsFor(id);
+      }
+      updates.push({ objectId: id, x: round(position.x), y: round(position.y) });
+    }
+    this.groupDrag = null;
+    if (updates.length) this.onObjectsMove(updates);
+  }
+
   _applyDraggable(entry) {
     const isGroup = entry.node instanceof Konva.Group;
     const allowed =
-      this.selectMode && isGroup && this.editPredicate(entry.data, entry.node);
+      (this.selectMode || this.lassoMode) &&
+      isGroup &&
+      this.editPredicate(entry.data, entry.node);
     entry.node.draggable(allowed);
     if (allowed && !entry.dragBound) {
       entry.dragBound = true;
       entry.node.on('dragstart', () => {
+        if (this.selectedIds.size > 1 && this.selectedIds.has(entry.data.id)) {
+          const starts = {};
+          const collect = (id) => {
+            const item = this.objects.get(id);
+            if (!item) return;
+            starts[id] = { x: item.node.x(), y: item.node.y() };
+          };
+          for (const id of this.selectedIds) collect(id);
+          for (const id of this.selectedIds) {
+            const item = this.objects.get(id);
+            if (item?.data.type !== 'frame') continue;
+            for (const [childId, child] of this.objects) {
+              if (child.data.frameId === id && child.data.type !== 'connector') {
+                collect(childId);
+              }
+            }
+          }
+          this.groupDrag = { draggedId: entry.data.id, starts };
+        }
         if (entry.data.type !== 'frame') return;
         entry.frameStart = { x: entry.node.x(), y: entry.node.y() };
         entry.childStarts = [];
@@ -1574,6 +1773,10 @@ export class Board {
         }
       });
       entry.node.on('dragmove', () => {
+        if (this.groupDrag) {
+          this._moveGroupDrag();
+          return;
+        }
         if (entry.data.type === 'frame') {
           const dx = entry.node.x() - entry.frameStart.x;
           const dy = entry.node.y() - entry.frameStart.y;
@@ -1593,6 +1796,10 @@ export class Board {
         }
       });
       entry.node.on('dragend', () => {
+        if (this.groupDrag) {
+          this._endGroupDrag();
+          return;
+        }
         if (entry.data.type === 'frame') {
           const position = entry.node.position();
           for (const start of entry.childStarts ?? []) {
@@ -1639,6 +1846,22 @@ export class Board {
   _handleStagePointerDown(event) {
     const native = event.evt;
     const empty = event.target === this.stage || event.target === this.paper;
+    if (this.lassoMode && native.button === 0 && !this.spaceHeld) {
+      let node = event.target;
+      while (node && node !== this.stage && !node.id()) node = node.getParent();
+      const entry = node && node !== this.stage ? this.objects.get(node.id()) : null;
+      if (entry && this.editPredicate(entry.data, entry.node)) {
+        if (!this.selectedIds.has(entry.data.id)) {
+          this.selectObjects([entry.data.id]);
+        }
+        return;
+      }
+      if (empty || (entry && !this.editPredicate(entry.data, entry.node))) {
+        native.preventDefault?.();
+        this._startLasso(native);
+        return;
+      }
+    }
     if (
       (this.canvasMode === 'infinite' || this.zoom > 1) &&
       (native.button === 1 ||

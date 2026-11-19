@@ -26,6 +26,8 @@ from app.models.schemas import (
     Kick,
     ObjectDelete,
     ObjectLock,
+    ObjectsDelete,
+    ObjectsMove,
     ObjectTransform,
     ObjectUpdate,
     PresentationSlide,
@@ -481,6 +483,10 @@ async def _handle_message(
         await _handle_frame_style(manager, room, user, message)
     elif isinstance(message, ObjectTransform):
         await _handle_object_transform(manager, room, user, message)
+    elif isinstance(message, ObjectsDelete):
+        await _handle_objects_delete(manager, room, user, message)
+    elif isinstance(message, ObjectsMove):
+        await _handle_objects_move(manager, room, user, message)
     elif isinstance(message, TextUpdate):
         await _handle_text_update(manager, room, user, message)
     elif isinstance(message, TextFont):
@@ -1134,6 +1140,111 @@ async def _handle_board_resize(
         room,
         {"type": "board_resize", "width": message.width, "height": message.height},
     )
+
+
+async def _handle_objects_delete(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: ObjectsDelete,
+) -> None:
+    targets: dict[str, dict[str, Any]] = {}
+    for object_id in dict.fromkeys(message.objectIds):
+        obj = room.get_object(object_id)
+        if obj is None or obj.get("workspaceId") != user.workspace_id:
+            continue
+        if _locked_for(room, obj):
+            await manager.send_to(user, _error("locked", "Элемент заблокирован учителем"))
+            return
+        if obj.get("type") == "frame" and any(
+            _locked_for(room, child) for child in room.objects if child.get("frameId") == obj["id"]
+        ):
+            await manager.send_to(user, _error("locked", "Элемент заблокирован учителем"))
+            return
+        if not (is_staff(user.role) or obj.get("author") == user.id):
+            await manager.send_to(user, _error("forbidden", "Удалять можно только свои объекты"))
+            return
+        if obj.get("type") == "frame" and not is_staff(user.role):
+            children = [child for child in room.objects if child.get("frameId") == obj["id"]]
+            if any(child.get("author") != user.id for child in children):
+                await manager.send_to(user, _error("forbidden", "Во фрейме есть чужие объекты"))
+                return
+        targets[obj["id"]] = obj
+        for cascade_id in _deletion_cascade(room, obj):
+            child = room.get_object(cascade_id)
+            if child is not None:
+                targets[cascade_id] = child
+
+    if not targets:
+        return
+    _push_delete(manager, room, user, list(targets.values()))
+    for object_id in targets:
+        manager.delete_object(room, object_id)
+        await manager.broadcast(
+            room,
+            {
+                "type": "object_delete",
+                "id": user.id,
+                "objectId": object_id,
+                "workspaceId": user.workspace_id,
+            },
+            exclude=user.id,
+            workspace_id=user.workspace_id,
+        )
+
+
+async def _handle_objects_move(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: ObjectsMove,
+) -> None:
+    direct = {update.objectId: update for update in message.updates}
+    affected: dict[str, dict[str, Any]] = {}
+    deltas: dict[str, tuple[float, float]] = {}
+    for object_id, update in direct.items():
+        obj = room.get_object(object_id)
+        if obj is None or obj.get("workspaceId") != user.workspace_id:
+            continue
+        if _locked_for(room, obj) or not _can_edit_object(user, obj):
+            continue
+        old_x = float(obj.get("x", 0) or 0)
+        old_y = float(obj.get("y", 0) or 0)
+        deltas[object_id] = (update.x - old_x, update.y - old_y)
+        affected[object_id] = obj
+        if obj.get("type") == "frame":
+            for child in room.objects:
+                if child.get("frameId") != object_id or child.get("type") == "connector":
+                    continue
+                affected[child["id"]] = child
+                deltas[child["id"]] = deltas[object_id]
+
+    if not affected:
+        return
+    _push_fields(manager, room, user, list(affected.values()), ("x", "y", "frameId"))
+    for object_id, (dx, dy) in deltas.items():
+        obj = affected.get(object_id)
+        if obj is None:
+            continue
+        obj["x"] = float(obj.get("x", 0) or 0) + dx
+        obj["y"] = float(obj.get("y", 0) or 0) + dy
+        if object_id in direct and obj.get("type") != "frame":
+            _attach_to_frame(room, obj, user)
+        manager.mark_dirty(room)
+        await manager.broadcast(
+            room,
+            {
+                "type": "object_update",
+                "id": user.id,
+                "objectId": object_id,
+                "x": obj["x"],
+                "y": obj["y"],
+                "frameId": obj.get("frameId"),
+                "workspaceId": user.workspace_id,
+            },
+            exclude=user.id,
+            workspace_id=user.workspace_id,
+        )
 
 
 async def _handle_object_delete(

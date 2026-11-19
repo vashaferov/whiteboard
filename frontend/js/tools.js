@@ -77,6 +77,7 @@ export class ToolManager {
     this.pendingTouch = null;
     this.tool = tool;
     this.board.setSelectMode(tool === 'select');
+    this.board.setLassoMode(tool === 'lasso');
   }
 
   setStyle({ color, width }) {
@@ -106,7 +107,7 @@ export class ToolManager {
     if (nativeEvent && typeof nativeEvent.button === 'number' && nativeEvent.button !== 0) {
       return;
     }
-    if (this.tool === 'select') return;
+    if (this.tool === 'select' || this.tool === 'lasso') return;
 
     const point = this.board.getPointer();
     if (!point) return;
