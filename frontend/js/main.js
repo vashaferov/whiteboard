@@ -184,6 +184,8 @@ function cacheElements() {
   els.boardWidth = $('#board-width');
   els.boardHeight = $('#board-height');
   els.boardSizeApply = $('#board-size-apply');
+  els.boardColor = $('#board-color');
+  els.boardColorReset = $('#board-color-reset');
   els.frameColors = $('#frame-colors');
   els.framePatternButtons = {
     none: $('#frame-pattern-none'),
@@ -551,13 +553,18 @@ function workspaceCanvas(workspace) {
 }
 
 function applyWorkspaceCanvas(workspace = currentWorkspace()) {
-  if (!state.board || workspace?.kind === 'presentation') return;
+  if (!state.board) return;
+  if (workspace?.kind === 'presentation') {
+    state.board.setBackground(null);
+    return;
+  }
   const canvas = workspaceCanvas(workspace);
   if (canvas.mode === 'fixed') {
     state.board.setCanvasMode('fixed', canvas.width, canvas.height);
   } else {
     state.board.setCanvasMode('infinite');
   }
+  state.board.setBackground(workspace?.background || null);
 }
 
 function updateBoardSizePanel() {
@@ -569,6 +576,9 @@ function updateBoardSizePanel() {
   els.boardHeight.value = String(canvas.height ?? 900);
   els.boardWidth.disabled = infinite;
   els.boardHeight.disabled = infinite;
+  if (els.boardColor) {
+    els.boardColor.value = currentWorkspace()?.background || '#ffffff';
+  }
   for (const preset of document.querySelectorAll('[data-board-preset]')) {
     preset.disabled = infinite;
   }
@@ -598,6 +608,12 @@ function bindBoardSize() {
       els.boardHeight.value = height;
     });
   }
+  els.boardColor?.addEventListener('change', () => {
+    sendWorkspace({ type: 'workspace_background', color: els.boardColor.value });
+  });
+  els.boardColorReset?.addEventListener('click', () => {
+    sendWorkspace({ type: 'workspace_background', color: null });
+  });
   els.boardSizeApply.addEventListener('click', () => {
     const mode = els.canvasInfinite.checked ? 'infinite' : 'fixed';
     if (mode === 'infinite') {
@@ -1291,6 +1307,16 @@ function handleServerEvent(message) {
       updateBoardSizePanel();
       break;
     }
+    case 'workspace_background': {
+      const workspace = state.workspaces.find((item) => item.id === message.workspaceId);
+      if (workspace) {
+        if (message.color) workspace.background = message.color;
+        else delete workspace.background;
+      }
+      if (message.workspaceId === state.workspaceId) applyWorkspaceCanvas(workspace);
+      updateBoardSizePanel();
+      break;
+    }
     case 'stroke_start':
     case 'stroke_point':
     case 'stroke_end':
@@ -1480,6 +1506,8 @@ function handleWorkspaceState(message) {
   if (workspace && workspace.kind !== 'presentation') {
     if (message.canvas) workspace.canvas = message.canvas;
     else delete workspace.canvas;
+    if (message.background) workspace.background = message.background;
+    else delete workspace.background;
   }
   if (switched) applyWorkspaceCanvas(workspace);
 

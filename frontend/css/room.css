@@ -621,6 +621,13 @@
   font-size: 10px;
 }
 
+#app .board-size-panel__color input[type="color"] {
+  width: 34px;
+  height: 28px;
+  padding: 2px;
+  cursor: pointer;
+}
+
 /* ----------------------------------------------------------------- panels */
 
 #app .workspace {
@@ -1190,6 +1197,14 @@
   content: "";
   opacity: 0.42;
   pointer-events: none;
+}
+
+#app .board.has-custom-bg {
+  background: var(--board-bg);
+}
+
+#app .board.has-custom-bg::before {
+  display: none;
 }
 
 #app .board__stage {
