@@ -20,6 +20,7 @@ test('board size changes for everyone and survives reload', async ({ browser, re
   await openRoom(teacher, setup.room.id);
   await openRoom(student, setup.room.id);
 
+  await teacher.click('#room-more-btn');
   await teacher.click('#board-size-btn');
   await teacher.fill('#board-width', '1200');
   await teacher.fill('#board-height', '800');

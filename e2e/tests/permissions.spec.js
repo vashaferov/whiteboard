@@ -41,6 +41,7 @@ test('permissions: student cannot delete or clear, teacher can clear and kick', 
 
   // The teacher clears the board for everyone.
   teacher.once('dialog', (dialog) => dialog.accept());
+  await teacher.click('#room-more-btn');
   await teacher.click('#clear-btn');
   await waitForObjectCount(teacher, 0);
   await waitForObjectCount(student, 0);
@@ -75,6 +76,7 @@ test('permissions: admin has teacher powers in a foreign room', async ({ browser
   await waitForObjectCount(student, 1);
 
   await admin.once('dialog', (dialog) => dialog.accept());
+  await admin.click('#room-more-btn');
   await admin.click('#clear-btn');
   await waitForObjectCount(teacher, 0);
   await waitForObjectCount(student, 0);

@@ -23,13 +23,64 @@ export class PagesPanel {
     this.onDelete = onDelete;
     this.onMove = onMove;
     this.onToggleCollapse = onToggleCollapse;
+    this.openMenuId = null;
+
+    document.addEventListener('click', (event) => {
+      if (!this.openMenuId) return;
+      if (!event.target.closest('.page')) {
+        this.openMenuId = null;
+        this.resyncMenu();
+      }
+    });
   }
 
   render(workspaces, activeId, { canManage = false, busy = false, collapsed = false } = {}) {
     this.container.replaceChildren();
 
+    const items = workspaces ?? [];
+    if (this.openMenuId && !items.some((workspace) => workspace.id === this.openMenuId)) {
+      this.openMenuId = null;
+    }
+
     const header = document.createElement('div');
     header.className = 'pages-panel__header';
+
+    const title = document.createElement('h2');
+    title.className = 'pages-panel__title';
+    title.append('Страницы');
+    const count = document.createElement('span');
+    count.textContent = String(items.length);
+    title.appendChild(count);
+    header.appendChild(title);
+
+    if (canManage) {
+      const adds = document.createElement('div');
+      adds.className = 'pages-panel__adds';
+
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.id = 'page-add';
+      add.className = 'page-add-icon';
+      add.textContent = '+';
+      add.title = 'Добавить страницу';
+      add.setAttribute('aria-label', 'Добавить страницу');
+      add.disabled = busy;
+      add.addEventListener('click', () => this.onCreate?.());
+      adds.appendChild(add);
+
+      const addPresentation = document.createElement('button');
+      addPresentation.type = 'button';
+      addPresentation.id = 'page-presentation';
+      addPresentation.className = 'page-add-icon';
+      addPresentation.textContent = 'PDF';
+      addPresentation.title = 'Загрузить PDF-презентацию';
+      addPresentation.setAttribute('aria-label', 'Загрузить PDF-презентацию');
+      addPresentation.disabled = busy;
+      addPresentation.addEventListener('click', () => this.onCreatePresentation?.());
+      adds.appendChild(addPresentation);
+
+      header.appendChild(adds);
+    }
 
     const toggle = document.createElement('button');
     toggle.type = 'button';
@@ -41,58 +92,37 @@ export class PagesPanel {
     toggle.addEventListener('click', () => this.onToggleCollapse?.());
     header.appendChild(toggle);
 
-    const title = document.createElement('h2');
-    title.className = 'pages-panel__title';
-    title.textContent = 'Страницы';
-    header.appendChild(title);
-
-    if (canManage) {
-      const adds = document.createElement('div');
-      adds.className = 'pages-panel__adds';
-
-      const add = document.createElement('button');
-      add.type = 'button';
-      add.id = 'page-add';
-      add.className = 'btn btn--ghost pages-panel__add';
-      add.textContent = '+ Страница';
-      add.disabled = busy;
-      add.addEventListener('click', () => this.onCreate?.());
-      adds.appendChild(add);
-
-      const addPresentation = document.createElement('button');
-      addPresentation.type = 'button';
-      addPresentation.id = 'page-presentation';
-      addPresentation.className = 'btn btn--ghost pages-panel__add';
-      addPresentation.textContent = '+ Презентация';
-      addPresentation.title = 'Загрузить PDF-презентацию';
-      addPresentation.disabled = busy;
-      addPresentation.addEventListener('click', () => this.onCreatePresentation?.());
-      adds.appendChild(addPresentation);
-
-      header.appendChild(adds);
-    }
-
     this.container.appendChild(header);
 
     const list = document.createElement('ul');
     list.className = 'page-list';
     this.container.appendChild(list);
 
-    const items = workspaces ?? [];
     items.forEach((workspace, index) => {
       const item = document.createElement('li');
       item.className = 'page';
       if (workspace.id === activeId) item.classList.add('is-active');
+      if (workspace.id === this.openMenuId) item.classList.add('is-menu-open');
 
       const select = document.createElement('button');
       select.type = 'button';
       select.className = 'page__select';
       select.disabled = busy;
-      select.addEventListener('click', () => this.onSelect?.(workspace.id));
+      select.addEventListener('click', () => {
+        this.openMenuId = null;
+        this.onSelect?.(workspace.id);
+      });
+
+      const number = document.createElement('span');
+      number.className = 'page__num';
+      number.textContent = String(index + 1);
+      select.appendChild(number);
 
       const name = document.createElement('span');
       name.className = 'page__name';
       name.textContent = workspace.name;
+      select.appendChild(name);
+
       if (workspace.kind === 'presentation') {
         item.classList.add('page--presentation');
         const kind = document.createElement('span');
@@ -101,16 +131,29 @@ export class PagesPanel {
         kind.title = 'Презентация';
         select.appendChild(kind);
       }
-      select.appendChild(name);
 
       item.appendChild(select);
 
       if (canManage) {
+        const menu = document.createElement('button');
+        menu.type = 'button';
+        menu.className = 'page__menu';
+        menu.textContent = '⋯';
+        menu.title = 'Действия со страницей';
+        menu.setAttribute('aria-label', 'Действия со страницей');
+        menu.setAttribute('aria-expanded', String(workspace.id === this.openMenuId));
+        menu.disabled = busy;
+        menu.addEventListener('click', () => {
+          this.openMenuId = this.openMenuId === workspace.id ? null : workspace.id;
+          this.render(workspaces, activeId, { canManage, busy, collapsed });
+        });
+        item.appendChild(menu);
+
         const actions = document.createElement('div');
         actions.className = 'page__actions';
 
-        const up = this._actionButton('page__up', '▲', 'Вверх', () => this.onMove?.(workspace.id, 'up'));
-        const down = this._actionButton('page__down', '▼', 'Вниз', () => this.onMove?.(workspace.id, 'down'));
+        const up = this._actionButton('page__up', '↑', 'Вверх', () => this.onMove?.(workspace.id, 'up'));
+        const down = this._actionButton('page__down', '↓', 'Вниз', () => this.onMove?.(workspace.id, 'down'));
         const rename = this._actionButton('page__rename', '✎', 'Переименовать', () => this.onRename?.(workspace));
         const del = this._actionButton('page__delete', '×', 'Удалить', () => this.onDelete?.(workspace));
         for (const button of [up, down, rename, del]) button.disabled = busy;
@@ -124,6 +167,38 @@ export class PagesPanel {
 
       list.appendChild(item);
     });
+
+    if (canManage) {
+      const footer = document.createElement('div');
+      footer.className = 'pages-panel__footer';
+
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'btn btn--ghost';
+      add.textContent = '+ Страница';
+      add.disabled = busy;
+      add.addEventListener('click', () => this.onCreate?.());
+      footer.appendChild(add);
+
+      const presentation = document.createElement('button');
+      presentation.type = 'button';
+      presentation.className = 'link';
+      presentation.textContent = 'Загрузить презентацию';
+      presentation.disabled = busy;
+      presentation.addEventListener('click', () => this.onCreatePresentation?.());
+      footer.appendChild(presentation);
+
+      this.container.appendChild(footer);
+    }
+  }
+
+  resyncMenu() {
+    this.container.querySelectorAll('.page').forEach((item) => {
+      item.classList.remove('is-menu-open');
+    });
+    this.container.querySelectorAll('.page__menu').forEach((button) => {
+      button.setAttribute('aria-expanded', 'false');
+    });
   }
 
   _actionButton(className, label, title, onClick) {
@@ -132,7 +207,11 @@ export class PagesPanel {
     button.className = className;
     button.title = title;
     button.textContent = label;
-    button.addEventListener('click', onClick);
+    button.addEventListener('click', () => {
+      this.openMenuId = null;
+      this.resyncMenu();
+      onClick();
+    });
     return button;
   }
 }
