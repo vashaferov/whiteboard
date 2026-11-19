@@ -30,7 +30,7 @@ test('zoom controls change the view and reset to fit', async ({ page, request })
   expect((await stageView(page)).scaleX).toBeCloseTo(fit.scaleX, 3);
 
   while (!(await page.locator('#zoom-out').isDisabled())) await page.click('#zoom-out');
-  await expect(page.locator('#zoom-reset')).toHaveText('50%');
+  await expect(page.locator('#zoom-reset')).toHaveText('10%');
 
   while (!(await page.locator('#zoom-in').isDisabled())) await page.click('#zoom-in');
   await expect(page.locator('#zoom-reset')).toHaveText('400%');
@@ -59,7 +59,7 @@ test('drawing after zoom uses world coordinates', async ({ page, request }) => {
   await page.click('#zoom-in');
   await expect(page.locator('#zoom-reset')).toHaveText('156%');
 
-  const target = { x: 400, y: 300 };
+  const target = { x: 800, y: 450 };
   const screen = await worldToScreen(page, target);
   await page.click('[data-tool="brush"]');
   await page.mouse.move(screen.x, screen.y);
@@ -87,13 +87,13 @@ test('resizing keeps the zoom', async ({ page, request }) => {
   await page.setViewportSize({ width: 900, height: 600 });
   await expect(page.locator('#zoom-reset')).toHaveText('156%');
   const after = await stageView(page);
-  expect(after.scaleX).not.toBeCloseTo(before.scaleX, 3);
+  expect(after.scaleX).toBeCloseTo(before.scaleX, 3);
 });
 
 test('export keeps the current zoom', async ({ page, request }) => {
   await openTeacherRoom(page, request);
-  const start = await worldToScreen(page, { x: 200, y: 200 });
-  const end = await worldToScreen(page, { x: 360, y: 300 });
+  const start = await worldToScreen(page, { x: 720, y: 400 });
+  const end = await worldToScreen(page, { x: 880, y: 500 });
   await page.click('[data-tool="rect"]');
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();

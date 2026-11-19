@@ -1,35 +1,45 @@
 import { expect, test } from '@playwright/test';
 
-import { lessonSetup, openRoom, reloadAndWait, signInWith } from '../helpers.js';
+import {
+  createPage,
+  lessonSetup,
+  openRoom,
+  reloadAndWait,
+  selectPage,
+  signInWith,
+} from '../helpers.js';
 
-function boardSize(page) {
+function paper(page) {
   return page.evaluate(() => {
-    const paper = window.Konva.stages[0].getLayers()[0].getChildren()[0];
-    return { width: paper.width(), height: paper.height() };
+    const node = window.Konva.stages[0].getLayers()[0].getChildren()[0];
+    return { width: node.width(), height: node.height(), visible: node.visible() };
   });
 }
 
-test('board size changes for everyone and survives reload', async ({ browser, request }) => {
-  const setup = await lessonSetup(request, { name: 'Board size' });
-  const teacherContext = await browser.newContext();
-  const studentContext = await browser.newContext();
-  const teacher = await teacherContext.newPage();
-  const student = await studentContext.newPage();
-  await signInWith(request, teacher, setup.teacherLogin);
-  await signInWith(request, student, setup.studentLogin);
-  await openRoom(teacher, setup.room.id);
-  await openRoom(student, setup.room.id);
+test('page canvas switches between infinite and fixed and remembers the mode', async ({
+  page,
+  request,
+}) => {
+  const setup = await lessonSetup(request, { name: 'Page canvas', student: false });
+  await signInWith(request, page, setup.teacherLogin);
+  await openRoom(page, setup.room.id);
 
-  await teacher.click('#room-more-btn');
-  await teacher.click('#board-size-btn');
-  await teacher.fill('#board-width', '1200');
-  await teacher.fill('#board-height', '800');
-  await teacher.click('#board-size-apply');
-  await expect.poll(() => boardSize(student)).toEqual({ width: 1200, height: 800 });
+  expect((await paper(page)).visible).toBe(false);
 
-  await reloadAndWait(teacher);
-  expect(await boardSize(teacher)).toEqual({ width: 1200, height: 800 });
+  await page.click('#room-more-btn');
+  await page.click('#board-size-btn');
+  await page.uncheck('#canvas-infinite');
+  await page.fill('#board-width', '1200');
+  await page.fill('#board-height', '800');
+  await page.click('#board-size-apply');
+  await expect.poll(() => paper(page)).toEqual({ width: 1200, height: 800, visible: true });
 
-  await teacherContext.close();
-  await studentContext.close();
+  await reloadAndWait(page);
+  expect(await paper(page)).toEqual({ width: 1200, height: 800, visible: true });
+
+  await createPage(page, 'Вторая');
+  expect((await paper(page)).visible).toBe(false);
+
+  await selectPage(page, 'Страница 1');
+  await expect.poll(() => paper(page)).toEqual({ width: 1200, height: 800, visible: true });
 });

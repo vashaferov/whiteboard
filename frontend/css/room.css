@@ -594,6 +594,12 @@
   font-size: 10.5px;
 }
 
+#app .board-size-panel__toggle {
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 #app .board-size-panel__field input {
   width: 64px;
   height: 28px;
