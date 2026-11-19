@@ -40,6 +40,7 @@ from app.models.schemas import (
     TextFont,
     TextUpdate,
     Undo,
+    WorkspaceBackground,
     WorkspaceCanvas,
     WorkspaceCreate,
     WorkspaceDelete,
@@ -495,6 +496,8 @@ async def _handle_message(
         await _handle_board_resize(manager, room, user, message)
     elif isinstance(message, WorkspaceCanvas):
         await _handle_workspace_canvas(manager, room, user, message)
+    elif isinstance(message, WorkspaceBackground):
+        await _handle_workspace_background(manager, room, user, message)
     elif isinstance(message, ObjectDelete):
         await _handle_object_delete(manager, room, user, message)
     elif isinstance(message, ObjectLock):
@@ -1563,6 +1566,40 @@ async def _handle_workspace_canvas(
             "type": "workspace_canvas",
             "workspaceId": user.workspace_id,
             "canvas": canvas,
+        },
+        workspace_id=user.workspace_id,
+    )
+
+
+async def _handle_workspace_background(
+    manager: RoomManager,
+    room: Room,
+    user: ConnectedUser,
+    message: WorkspaceBackground,
+) -> None:
+    if not is_staff(user.role):
+        await manager.send_to(user, _error("forbidden", "Цвет холста может менять только учитель"))
+        return
+    if not await _check_workspace(manager, user, message):
+        return
+    workspace = room.get_workspace(user.workspace_id)
+    if workspace is None or workspace.get("kind") == PRESENTATION_KIND:
+        await manager.send_to(
+            user, _error("invalid_message", "Страница презентации не имеет холста")
+        )
+        return
+    color = message.color.lower() if message.color else None
+    if color is None:
+        workspace.pop("background", None)
+    else:
+        workspace["background"] = color
+    manager.mark_dirty(room)
+    await manager.broadcast(
+        room,
+        {
+            "type": "workspace_background",
+            "workspaceId": user.workspace_id,
+            "color": color,
         },
         workspace_id=user.workspace_id,
     )

@@ -12,7 +12,7 @@ import re
 import uuid
 from typing import Any
 
-from app.models.schemas import WORKSPACE_ID_PATTERN
+from app.models.schemas import COLOR_PATTERN, WORKSPACE_ID_PATTERN
 
 DEFAULT_WORKSPACE_ID = "ws_default"
 DEFAULT_WORKSPACE_NAME = "Страница 1"
@@ -24,6 +24,7 @@ CANVAS_MAX = 4000
 CANVAS_RATIO = 4
 
 _WORKSPACE_ID_RE = re.compile(WORKSPACE_ID_PATTERN)
+_BACKGROUND_RE = re.compile(COLOR_PATTERN)
 _PAGE_NAME_RE = re.compile(r"^Страница (\d+)$")
 
 # Missing / malformed positions sort after every explicit one, keeping input order.
@@ -54,6 +55,14 @@ def normalize_canvas(raw: Any) -> dict[str, Any] | None:
     if max(width / height, height / width) > CANVAS_RATIO:
         return None
     return {"mode": "fixed", "width": width, "height": height}
+
+
+def normalize_background(raw: Any) -> str | None:
+    """Validate a page background color; ``None`` means the default board."""
+    if not isinstance(raw, str):
+        return None
+    color = raw.lower()
+    return color if _BACKGROUND_RE.fullmatch(color) is not None else None
 
 
 def _position(value: Any) -> int:
@@ -108,6 +117,9 @@ def normalize_workspaces(raw: Any) -> list[dict[str, Any]]:
             canvas = normalize_canvas(item.get("canvas"))
             if canvas is not None:
                 workspace["canvas"] = canvas
+            background = normalize_background(item.get("background"))
+            if background is not None:
+                workspace["background"] = background
         workspaces.append(workspace)
     workspaces.sort(key=lambda workspace: workspace["position"])
     for position, workspace in enumerate(workspaces):
