@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 from tests.support import cookie, ws_connect
+from tests.test_board_elements import barrier, codes, recv_until
 
 PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
@@ -535,3 +536,14 @@ def test_websocket_requires_valid_session(client: TestClient) -> None:
         with pytest.raises(WebSocketDisconnect) as invalid:
             ws.receive_json()
         assert invalid.value.code == 4401
+
+
+def test_coordinates_allow_infinite_canvas_range(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    with ws_connect(client, teacher["token"]) as tw:
+        tw.receive_json()
+        barrier(tw)
+        tw.send_json({**SHAPE, "objectId": "far", "x": 999_999, "y": -999_999})
+        assert "invalid_message" not in codes(barrier(tw))
+        tw.send_json({**SHAPE, "objectId": "too-far", "x": 1_000_001, "y": 0})
+        assert recv_until(tw, "error")["code"] == "invalid_message"

@@ -180,6 +180,7 @@ function cacheElements() {
   els.framePanel = $('#frame-panel');
   els.boardSizeBtn = $('#board-size-btn');
   els.boardSizePanel = $('#board-size-panel');
+  els.canvasInfinite = $('#canvas-infinite');
   els.boardWidth = $('#board-width');
   els.boardHeight = $('#board-height');
   els.boardSizeApply = $('#board-size-apply');
@@ -536,10 +537,36 @@ function updateBoardSizeUI(presentation = isPresentation()) {
   if (!canResize) els.boardSizePanel.hidden = true;
 }
 
+function currentWorkspace() {
+  return state.workspaces.find((workspace) => workspace.id === state.workspaceId) || null;
+}
+
+function workspaceCanvas(workspace) {
+  return workspace?.canvas || { mode: 'infinite' };
+}
+
+function applyWorkspaceCanvas(workspace = currentWorkspace()) {
+  if (!state.board || workspace?.kind === 'presentation') return;
+  const canvas = workspaceCanvas(workspace);
+  if (canvas.mode === 'fixed') {
+    state.board.setCanvasMode('fixed', canvas.width, canvas.height);
+  } else {
+    state.board.setCanvasMode('infinite');
+  }
+}
+
 function updateBoardSizePanel() {
-  if (!els.boardSizePanel || els.boardSizePanel.hidden || !state.board) return;
-  els.boardWidth.value = String(state.board.width);
-  els.boardHeight.value = String(state.board.height);
+  if (!els.boardSizePanel || els.boardSizePanel.hidden) return;
+  const canvas = workspaceCanvas(currentWorkspace());
+  const infinite = canvas.mode !== 'fixed';
+  els.canvasInfinite.checked = infinite;
+  els.boardWidth.value = String(canvas.width ?? 1600);
+  els.boardHeight.value = String(canvas.height ?? 900);
+  els.boardWidth.disabled = infinite;
+  els.boardHeight.disabled = infinite;
+  for (const preset of document.querySelectorAll('[data-board-preset]')) {
+    preset.disabled = infinite;
+  }
 }
 
 function bindBoardSize() {
@@ -548,18 +575,34 @@ function bindBoardSize() {
     els.boardSizePanel.hidden = !els.boardSizePanel.hidden;
     updateBoardSizePanel();
   });
+  els.canvasInfinite?.addEventListener('change', () => {
+    const infinite = els.canvasInfinite.checked;
+    els.boardWidth.disabled = infinite;
+    els.boardHeight.disabled = infinite;
+    for (const preset of document.querySelectorAll('[data-board-preset]')) {
+      preset.disabled = infinite;
+    }
+  });
   for (const preset of document.querySelectorAll('[data-board-preset]')) {
     preset.addEventListener('click', () => {
       const [width, height] = preset.dataset.boardPreset.split('x');
+      els.canvasInfinite.checked = false;
+      els.boardWidth.disabled = false;
+      els.boardHeight.disabled = false;
       els.boardWidth.value = width;
       els.boardHeight.value = height;
     });
   }
   els.boardSizeApply.addEventListener('click', () => {
-    const width = Number(els.boardWidth.value);
-    const height = Number(els.boardHeight.value);
-    if (!Number.isInteger(width) || !Number.isInteger(height)) return;
-    sendWorkspace({ type: 'board_resize', width, height });
+    const mode = els.canvasInfinite.checked ? 'infinite' : 'fixed';
+    if (mode === 'infinite') {
+      sendWorkspace({ type: 'workspace_canvas', mode });
+    } else {
+      const width = Number(els.boardWidth.value);
+      const height = Number(els.boardHeight.value);
+      if (!Number.isInteger(width) || !Number.isInteger(height)) return;
+      sendWorkspace({ type: 'workspace_canvas', mode, width, height });
+    }
     els.boardSizePanel.hidden = true;
   });
 }
@@ -700,8 +743,9 @@ function selectTool(tool) {
 
 function updateZoomControls(percent = 100) {
   if (!els.zoomReset) return;
+  const min = state.board?.canvasMode === 'infinite' ? 10 : 50;
   els.zoomReset.textContent = `${percent}%`;
-  els.zoomOut.disabled = percent <= 50;
+  els.zoomOut.disabled = percent <= min;
   els.zoomIn.disabled = percent >= 400;
 }
 
@@ -958,6 +1002,7 @@ function applyWorkspaceMode() {
     state.board.clearPresentationSlide();
     updateSlideControls();
     if (wasPresentation) {
+      applyWorkspaceCanvas(currentWorkspace());
       const restore = state.toolBeforePresentation || 'brush';
       state.toolBeforePresentation = null;
       selectTool(restore);
@@ -1231,6 +1276,16 @@ function handleServerEvent(message) {
       state.board?.setBoardSize(message.width, message.height);
       updateBoardSizePanel();
       break;
+    case 'workspace_canvas': {
+      const workspace = state.workspaces.find((item) => item.id === message.workspaceId);
+      if (workspace) {
+        if (message.canvas) workspace.canvas = message.canvas;
+        else delete workspace.canvas;
+      }
+      if (message.workspaceId === state.workspaceId) applyWorkspaceCanvas(workspace);
+      updateBoardSizePanel();
+      break;
+    }
     case 'stroke_start':
     case 'stroke_point':
     case 'stroke_end':
@@ -1403,6 +1458,7 @@ function handleWorkspaceState(message) {
   const version = message.stateVersion ?? 0;
   if (version <= state.stateVersion) return;
 
+  const switched = state.workspaceId !== message.workspaceId;
   state.stateVersion = version;
   state.workspaceId = message.workspaceId;
   state.pendingWorkspaceId = null;
@@ -1416,6 +1472,11 @@ function handleWorkspaceState(message) {
   if (workspace && typeof message.slideIndex === 'number') {
     workspace.slideIndex = message.slideIndex;
   }
+  if (workspace && workspace.kind !== 'presentation') {
+    if (message.canvas) workspace.canvas = message.canvas;
+    else delete workspace.canvas;
+  }
+  if (switched) applyWorkspaceCanvas(workspace);
 
   const buffered = state.pendingEvents;
   state.pendingEvents = [];
@@ -1510,9 +1571,9 @@ function handleInit(message) {
   state.selectedStudentIds = new Set();
   if (state.sync) state.sync.workspaceId = state.workspaceId ?? '';
 
-  state.board.setBoardSize(message.board.width, message.board.height);
   state.board.setObjects(message.objects);
   state.board.clearCursors();
+  applyWorkspaceCanvas(currentWorkspace());
   state.ready = true;
 
   renderUsers();

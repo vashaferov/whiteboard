@@ -38,7 +38,7 @@ test('text: font applies to new and selected text and is shared', async ({ brows
   await expect.poll(() => textFont(student)).toContain('Georgia');
 
   await teacher.click('[data-tool="select"]');
-  await teacher.mouse.click(point.x + 12, point.y + 12);
+  await teacher.mouse.click(point.x + 2, point.y + 2);
   await expect(teacher.locator('#font-select')).toHaveValue('serif');
   await teacher.selectOption('#font-select', 'mono');
   await expect.poll(() => textFont(teacher)).toContain('Consolas');

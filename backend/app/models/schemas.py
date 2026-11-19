@@ -21,8 +21,8 @@ WORKSPACE_REQUEST_PATTERN = r"^mv_[a-f0-9]{32}$"
 COLOR_PATTERN = r"^#[0-9a-fA-F]{6}$"
 UPLOAD_URL_PATTERN = r"^(?:/uploads/[A-Za-z0-9_.-]{1,128}|https?://[^\s\"']{1,500})$"
 
-COORD_MIN = -20000.0
-COORD_MAX = 20000.0
+COORD_MIN = -1_000_000.0
+COORD_MAX = 1_000_000.0
 
 
 class BoardSize(BaseModel):
@@ -296,6 +296,13 @@ class BoardResize(_Message):
     height: int = Field(ge=640, le=4000)
 
 
+class WorkspaceCanvas(_Message):
+    type: Literal["workspace_canvas"]
+    mode: Literal["infinite", "fixed"]
+    width: int | None = Field(default=None, ge=640, le=4000)
+    height: int | None = Field(default=None, ge=640, le=4000)
+
+
 class TextUpdate(_Message):
     type: Literal["text_update"]
     objectId: str = Field(pattern=OBJECT_ID_PATTERN)
@@ -451,6 +458,7 @@ ClientMessage = Annotated[
     | TextUpdate
     | TextFont
     | BoardResize
+    | WorkspaceCanvas
     | ObjectDelete
     | ObjectLock
     | Undo

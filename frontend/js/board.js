@@ -19,8 +19,15 @@ function isEditableTarget(target) {
   const tag = target.tagName;
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
 }
+function gridStep(scale) {
+  let step = 32;
+  while (step * scale < 12) step *= 2;
+  while (step * scale > 64 && step > 4) step /= 2;
+  return step;
+}
 const MIN_SCALE = 0.1;
 const MIN_ZOOM = 0.5;
+const INFINITE_MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
 const PAN_KEEP_RATIO = 0.25;
 const PAN_THRESHOLD = 4;
@@ -62,6 +69,8 @@ export class Board {
     this.container = container;
     this.width = options.width ?? 1600;
     this.height = options.height ?? 900;
+    this.canvasMode = 'infinite';
+    this.presentation = false;
     this.onObjectMove = options.onObjectMove ?? (() => {});
     this.onObjectTransform = options.onObjectTransform ?? (() => {});
     this.onEditText = options.onEditText ?? (() => {});
@@ -106,11 +115,11 @@ export class Board {
       height: this.height,
       listening: false,
       perfectDrawEnabled: false,
-      sceneFunc: (ctx) => {
+      sceneFunc: (ctx, shape) => {
         ctx.beginPath();
-        const step = 32;
-        for (let x = step; x < this.width; x += step) {
-          for (let y = step; y < this.height; y += step) {
+        const step = this._gridStep || 32;
+        for (let x = step; x < shape.width(); x += step) {
+          for (let y = step; y < shape.height(); y += step) {
             ctx.moveTo(x + 1.4, y);
             ctx.arc(x, y, 1.4, 0, Math.PI * 2);
           }
@@ -120,6 +129,7 @@ export class Board {
       },
     });
     this.backgroundLayer.add(this.paper, this.grid);
+    this.paper.visible(false);
 
     this.transformer = new Konva.Transformer({
       nodes: [],
@@ -195,35 +205,108 @@ export class Board {
     this.zoom = 1;
     this.panX = 0;
     this.panY = 0;
-    this.layout();
+    if (this.canvasMode === 'infinite' && !this.presentation) {
+      this.fitContent();
+    } else {
+      this.layout();
+    }
   }
 
   layout() {
     if (this.destroyed) return;
     const containerWidth = Math.max(1, this.container.clientWidth);
     const containerHeight = Math.max(1, this.container.clientHeight);
-    this.fitScale = Math.max(
-      MIN_SCALE,
-      Math.min(containerWidth / this.width, containerHeight / this.height),
-    );
+    this.fitScale =
+      this.canvasMode === 'fixed'
+        ? Math.max(
+            MIN_SCALE,
+            Math.min(containerWidth / this.width, containerHeight / this.height),
+          )
+        : 1;
     this._clampView(containerWidth, containerHeight);
     this._applyView(containerWidth, containerHeight);
   }
 
   _applyView(containerWidth, containerHeight) {
-    const scale = this.fitScale * this.zoom;
+    const scale = this.canvasMode === 'fixed' ? this.fitScale * this.zoom : this.zoom;
     this.scale = scale;
-    this.offsetX = (containerWidth - this.width * scale) / 2 + this.panX;
-    this.offsetY = (containerHeight - this.height * scale) / 2 + this.panY;
+    if (this.canvasMode === 'fixed') {
+      this.offsetX = (containerWidth - this.width * scale) / 2 + this.panX;
+      this.offsetY = (containerHeight - this.height * scale) / 2 + this.panY;
+    } else {
+      this.offsetX = containerWidth / 2 + this.panX;
+      this.offsetY = containerHeight / 2 + this.panY;
+    }
     this.stage.size({ width: containerWidth, height: containerHeight });
     this.stage.scale({ x: scale, y: scale });
     this.stage.position({ x: this.offsetX, y: this.offsetY });
-    this.container.classList.toggle('is-pannable', this.zoom > 1 && this.selectMode);
+    this.container.classList.toggle(
+      'is-pannable',
+      this.selectMode && (this.canvasMode === 'infinite' || this.zoom > 1),
+    );
+    this._updateGrid(containerWidth, containerHeight, scale);
     this.stage.batchDraw();
     this.onViewChange(this.getZoomPercent());
   }
 
+  _updateGrid(containerWidth, containerHeight, scale) {
+    if (this.canvasMode === 'fixed') {
+      this.grid.position({ x: 0, y: 0 });
+      this.grid.size({ width: this.width, height: this.height });
+      this.grid._gridStep = 32;
+      return;
+    }
+    const step = gridStep(scale);
+    const left = -this.offsetX / scale;
+    const top = -this.offsetY / scale;
+    const x0 = Math.floor(left / step) * step;
+    const y0 = Math.floor(top / step) * step;
+    this.grid.position({ x: x0, y: y0 });
+    this.grid.size({
+      width: containerWidth / scale + step * 2,
+      height: containerHeight / scale + step * 2,
+    });
+    this.grid._gridStep = step;
+  }
+
+  contentBounds() {
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const entry of this.objects.values()) {
+      const rect = entry.node.getClientRect({ relativeTo: this.contentLayer });
+      left = Math.min(left, rect.x);
+      top = Math.min(top, rect.y);
+      right = Math.max(right, rect.x + rect.width);
+      bottom = Math.max(bottom, rect.y + rect.height);
+    }
+    if (!Number.isFinite(left)) return null;
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  }
+
+  fitContent() {
+    const containerWidth = Math.max(1, this.container.clientWidth);
+    const containerHeight = Math.max(1, this.container.clientHeight);
+    const bounds = this.contentBounds() ?? { x: 0, y: 0, width: 1600, height: 900 };
+    const padding = Math.max(40, Math.max(bounds.width, bounds.height) * 0.1);
+    const zoom = clamp(
+      Math.min(
+        1,
+        (containerWidth - padding * 2) / Math.max(bounds.width, 1),
+        (containerHeight - padding * 2) / Math.max(bounds.height, 1),
+      ),
+      INFINITE_MIN_ZOOM,
+      MAX_ZOOM,
+    );
+    this.zoom = zoom;
+    this.panX = -(bounds.x + bounds.width / 2) * zoom;
+    this.panY = -(bounds.y + bounds.height / 2) * zoom;
+    this._applyView(containerWidth, containerHeight);
+  }
+
   _clampView(containerWidth, containerHeight) {
+    if (this.canvasMode === 'infinite') return;
     if (this.zoom <= 1) {
       this.panX = 0;
       this.panY = 0;
@@ -251,7 +334,8 @@ export class Board {
   }
 
   setZoom(zoom, anchor = null) {
-    const next = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+    const minZoom = this.canvasMode === 'fixed' ? MIN_ZOOM : INFINITE_MIN_ZOOM;
+    const next = clamp(zoom, minZoom, MAX_ZOOM);
     if (next === this.zoom) return;
     const containerWidth = Math.max(1, this.container.clientWidth);
     const containerHeight = Math.max(1, this.container.clientHeight);
@@ -263,10 +347,15 @@ export class Board {
       : null;
     this.zoom = next;
     if (world) {
-      const scale = this.fitScale * next;
-      this.panX = anchor.x - world.x * scale - (containerWidth - this.width * scale) / 2;
-      this.panY =
-        anchor.y - world.y * scale - (containerHeight - this.height * scale) / 2;
+      const scale = this.canvasMode === 'fixed' ? this.fitScale * next : next;
+      const baseX =
+        this.canvasMode === 'fixed' ? (containerWidth - this.width * scale) / 2 : containerWidth / 2;
+      const baseY =
+        this.canvasMode === 'fixed'
+          ? (containerHeight - this.height * scale) / 2
+          : containerHeight / 2;
+      this.panX = anchor.x - world.x * scale - baseX;
+      this.panY = anchor.y - world.y * scale - baseY;
     }
     this._clampView(containerWidth, containerHeight);
     this._applyView(containerWidth, containerHeight);
@@ -277,7 +366,7 @@ export class Board {
   }
 
   _setPan(panX, panY) {
-    if (this.zoom <= 1) return;
+    if (this.canvasMode === 'fixed' && this.zoom <= 1) return;
     const containerWidth = Math.max(1, this.container.clientWidth);
     const containerHeight = Math.max(1, this.container.clientHeight);
     this.panX = panX;
@@ -383,10 +472,22 @@ export class Board {
     this.layout();
   }
 
+  setCanvasMode(mode, width = this.width, height = this.height) {
+    this.canvasMode = mode === 'fixed' ? 'fixed' : 'infinite';
+    this.width = width;
+    this.height = height;
+    this.paper.size({ width, height });
+    this.grid.size({ width, height });
+    this.paper.visible(this.canvasMode === 'fixed' && !this.presentation);
+    this.grid.visible(!this.presentation);
+    this.resetView();
+  }
+
   clearPresentationSlide() {
     this.slideToken += 1;
     this.slideImage?.destroy();
     this.slideImage = null;
+    this.presentation = false;
     this.grid.visible(true);
     this.backgroundLayer.batchDraw();
   }
@@ -409,19 +510,17 @@ export class Board {
     });
     if (token !== this.slideToken || this.destroyed) return;
 
-    const scale = Math.min(
-      this.width / Math.max(image.naturalWidth, 1),
-      this.height / Math.max(image.naturalHeight, 1),
-    );
-    const width = image.naturalWidth * scale;
-    const height = image.naturalHeight * scale;
+    this.presentation = true;
+    this.setCanvasMode('fixed', image.naturalWidth, image.naturalHeight);
+    this.paper.visible(false);
+    this.grid.visible(false);
     const node = new Konva.Image({
       name: 'slide-bg',
       image,
-      x: (this.width - width) / 2,
-      y: (this.height - height) / 2,
-      width,
-      height,
+      x: 0,
+      y: 0,
+      width: this.width,
+      height: this.height,
       listening: false,
     });
     this.backgroundLayer.add(node);
@@ -439,6 +538,14 @@ export class Board {
     }
     await Promise.all(images);
 
+    const bounds = this.contentBounds();
+    if (!bounds) throw new Error('Нет объектов для экспорта');
+    const padding = Math.max(32, Math.max(bounds.width, bounds.height) * 0.03);
+    const left = bounds.x - padding;
+    const top = bounds.y - padding;
+    const width = bounds.width + padding * 2;
+    const height = bounds.height + padding * 2;
+
     const stage = this.stage;
     const saved = {
       width: stage.width(),
@@ -450,6 +557,7 @@ export class Board {
       overlay: this.overlayLayer.visible(),
       transformer: this.transformer.visible(),
       grid: this.grid.visible(),
+      paper: this.paper.visible(),
       shadow: this.paper.shadowEnabled(),
     };
     const badges = [];
@@ -460,22 +568,40 @@ export class Board {
         badge.visible(false);
       }
     }
+    const background = new Konva.Rect({
+      x: left,
+      y: top,
+      width,
+      height,
+      fill: '#ffffff',
+      listening: false,
+    });
+    this.backgroundLayer.add(background);
+    background.moveToBottom();
 
     try {
       this.overlayLayer.visible(false);
       this.transformer.visible(false);
       this.grid.visible(false);
+      this.paper.visible(false);
       this.paper.shadowEnabled(false);
-      stage.size({ width: this.width, height: this.height });
+      stage.size({ width: Math.ceil(width), height: Math.ceil(height) });
       stage.scale({ x: 1, y: 1 });
-      stage.position({ x: 0, y: 0 });
+      stage.position({ x: -left, y: -top });
       stage.draw();
-      return stage.toCanvas({ pixelRatio: 2 });
+      const pixelRatio = Math.min(2, 8000 / Math.max(width, height, 1));
+      return {
+        canvas: stage.toCanvas({ pixelRatio }),
+        width,
+        height,
+      };
     } finally {
+      background.destroy();
       for (const [badge, visible] of badges) badge.visible(visible);
       this.overlayLayer.visible(saved.overlay);
       this.transformer.visible(saved.transformer);
       this.grid.visible(saved.grid);
+      this.paper.visible(saved.paper);
       this.paper.shadowEnabled(saved.shadow);
       stage.size({ width: saved.width, height: saved.height });
       stage.scale({ x: saved.scaleX, y: saved.scaleY });
@@ -1286,7 +1412,10 @@ export class Board {
   setSelectMode(enabled) {
     this.selectMode = enabled;
     if (!enabled) this.selectObject(null);
-    this.container.classList.toggle('is-pannable', this.zoom > 1 && enabled);
+    this.container.classList.toggle(
+      'is-pannable',
+      enabled && (this.canvasMode === 'infinite' || this.zoom > 1),
+    );
     for (const entry of this.objects.values()) this._applyDraggable(entry);
   }
 
@@ -1508,10 +1637,13 @@ export class Board {
     const native = event.evt;
     const empty = event.target === this.stage || event.target === this.paper;
     if (
-      this.zoom > 1 &&
+      (this.canvasMode === 'infinite' || this.zoom > 1) &&
       (native.button === 1 ||
         this.spaceHeld ||
-        (native.button === 0 && this.selectMode && empty))
+        (native.button === 0 &&
+          this.selectMode &&
+          empty &&
+          native.pointerType !== 'touch'))
     ) {
       native.preventDefault?.();
       this.panDrag = {

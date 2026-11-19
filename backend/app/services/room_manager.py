@@ -70,6 +70,7 @@ WORKSPACE_SCOPED_EVENTS = {
     "presentation_slide",
     "clear",
     "cursor",
+    "workspace_canvas",
     "cursor_remove",
 }
 
@@ -744,6 +745,8 @@ class RoomManager:
             "stateVersion": user.state_version,
         }
         workspace = room.get_workspace(workspace_id)
+        if workspace is not None:
+            payload["canvas"] = workspace.get("canvas")
         if workspace is not None and workspace.get("kind") == PRESENTATION_KIND:
             payload["slideIndex"] = int(workspace.get("slideIndex", 0) or 0)
         return payload
@@ -1319,6 +1322,7 @@ class RoomManager:
             "workspace_created",
             "workspace_renamed",
             "workspace_reordered",
+            "workspace_canvas",
         ):
             await self._write_workspaces(room)
         elif kind == "workspace_deleted":
@@ -1442,6 +1446,16 @@ class RoomManager:
             ):
                 slides = workspace.get("slides") or []
                 workspace["slideIndex"] = min(max(slide, 0), max(len(slides) - 1, 0))
+                changed = True
+        elif kind == "workspace_canvas":
+            workspace_id = message.get("workspaceId")
+            workspace = room.workspaces.get(workspace_id) if isinstance(workspace_id, str) else None
+            if workspace is not None:
+                canvas = message.get("canvas")
+                if isinstance(canvas, dict) and canvas.get("mode") == "fixed":
+                    workspace["canvas"] = canvas
+                else:
+                    workspace.pop("canvas", None)
                 changed = True
         elif kind == "workspace_created":
             workspace = message.get("workspace")

@@ -9,6 +9,7 @@ import {
   openLesson,
   openRoom,
   signInWith,
+  stageView,
   worldToScreen,
 } from '../helpers.js';
 
@@ -205,8 +206,9 @@ test('undo: ctrl+z restores a moved object and empty history toasts', async ({ b
   await drawRect(page, { x: 100, y: 100 }, { x: 220, y: 180 });
   await page.click('[data-tool="select"]');
   const before = await firstPosition(page);
-  const start = await worldToScreen(page, { x: 100, y: 140 });
-  await dragBy(page, start, 140, 80);
+  const start = await worldToScreen(page, { x: 160, y: 140 });
+  const scale = (await stageView(page)).scaleX;
+  await dragBy(page, start, 140 * scale, 80 * scale);
   await expect.poll(async () => (await firstPosition(page)).x).toBeGreaterThan(before.x + 100);
 
   await page.keyboard.press('Control+z');

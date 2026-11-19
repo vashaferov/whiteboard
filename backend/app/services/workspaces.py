@@ -19,6 +19,9 @@ DEFAULT_WORKSPACE_NAME = "Страница 1"
 MAX_WORKSPACE_NAME_LENGTH = 60
 PRESENTATION_KIND = "presentation"
 MAX_PRESENTATION_SLIDES = 80
+CANVAS_MIN = 640
+CANVAS_MAX = 4000
+CANVAS_RATIO = 4
 
 _WORKSPACE_ID_RE = re.compile(WORKSPACE_ID_PATTERN)
 _PAGE_NAME_RE = re.compile(r"^Страница (\d+)$")
@@ -35,6 +38,22 @@ def new_workspace_id() -> str:
 def default_workspace() -> dict[str, Any]:
     """Return the workspace every room starts with."""
     return {"id": DEFAULT_WORKSPACE_ID, "name": DEFAULT_WORKSPACE_NAME, "position": 0}
+
+
+def normalize_canvas(raw: Any) -> dict[str, Any] | None:
+    """Validate a fixed canvas; ``None`` means the page is infinite."""
+    if not isinstance(raw, dict) or raw.get("mode") != "fixed":
+        return None
+    try:
+        width = int(raw["width"])
+        height = int(raw["height"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (CANVAS_MIN <= width <= CANVAS_MAX and CANVAS_MIN <= height <= CANVAS_MAX):
+        return None
+    if max(width / height, height / width) > CANVAS_RATIO:
+        return None
+    return {"mode": "fixed", "width": width, "height": height}
 
 
 def _position(value: Any) -> int:
@@ -85,6 +104,10 @@ def normalize_workspaces(raw: Any) -> list[dict[str, Any]]:
                 slides=slides,
                 slideIndex=min(max(index, 0), max(len(slides) - 1, 0)),
             )
+        else:
+            canvas = normalize_canvas(item.get("canvas"))
+            if canvas is not None:
+                workspace["canvas"] = canvas
         workspaces.append(workspace)
     workspaces.sort(key=lambda workspace: workspace["position"])
     for position, workspace in enumerate(workspaces):
