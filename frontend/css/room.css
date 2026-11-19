@@ -138,13 +138,13 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 360px;
-  padding: 5px 11px;
+  max-width: 380px;
+  padding: 6px 12px;
   overflow: hidden;
   border-radius: 999px;
   background: #f3f7fc;
   color: #526580;
-  font-size: 11.5px;
+  font-size: 13px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1693,7 +1693,21 @@
   }
 
   #app .pages-panel__footer {
-    display: none;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  #app .pages-panel__footer .btn {
+    width: auto;
+    height: 32px;
+    padding: 0 8px;
+    font-size: 10.5px;
+    white-space: nowrap;
   }
 
   #app .board {

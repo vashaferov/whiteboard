@@ -53,35 +53,6 @@ export class PagesPanel {
     title.appendChild(count);
     header.appendChild(title);
 
-    if (canManage) {
-      const adds = document.createElement('div');
-      adds.className = 'pages-panel__adds';
-
-      const add = document.createElement('button');
-      add.type = 'button';
-      add.id = 'page-add';
-      add.className = 'page-add-icon';
-      add.textContent = '+';
-      add.title = 'Добавить страницу';
-      add.setAttribute('aria-label', 'Добавить страницу');
-      add.disabled = busy;
-      add.addEventListener('click', () => this.onCreate?.());
-      adds.appendChild(add);
-
-      const addPresentation = document.createElement('button');
-      addPresentation.type = 'button';
-      addPresentation.id = 'page-presentation';
-      addPresentation.className = 'page-add-icon';
-      addPresentation.textContent = 'PDF';
-      addPresentation.title = 'Загрузить PDF-презентацию';
-      addPresentation.setAttribute('aria-label', 'Загрузить PDF-презентацию');
-      addPresentation.disabled = busy;
-      addPresentation.addEventListener('click', () => this.onCreatePresentation?.());
-      adds.appendChild(addPresentation);
-
-      header.appendChild(adds);
-    }
-
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.id = 'pages-toggle';
@@ -174,6 +145,7 @@ export class PagesPanel {
 
       const add = document.createElement('button');
       add.type = 'button';
+      add.id = 'page-add';
       add.className = 'btn btn--ghost';
       add.textContent = '+ Страница';
       add.disabled = busy;
@@ -182,8 +154,10 @@ export class PagesPanel {
 
       const presentation = document.createElement('button');
       presentation.type = 'button';
-      presentation.className = 'link';
+      presentation.id = 'page-presentation';
+      presentation.className = 'btn btn--ghost';
       presentation.textContent = 'Загрузить презентацию';
+      presentation.title = 'Загрузить PDF-презентацию';
       presentation.disabled = busy;
       presentation.addEventListener('click', () => this.onCreatePresentation?.());
       footer.appendChild(presentation);

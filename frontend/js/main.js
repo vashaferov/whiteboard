@@ -54,7 +54,7 @@ const state = {
   sync: null,
   color: PALETTE[1],
   width: 4,
-  tool: 'brush',
+  tool: 'select',
   invisible: false,
   ready: false,
   textPoint: null,

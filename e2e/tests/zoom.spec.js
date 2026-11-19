@@ -196,6 +196,8 @@ test('two fingers pinch, pan and do not leave stray objects', async ({ page, req
   await expect(page.locator('#zoom-reset')).toHaveText('200%');
   expect(await objectCount(page)).toBe(0);
 
+  // The room starts in Select; choose the brush for the one-finger stroke.
+  await page.click('[data-tool="brush"]');
   await client.send('Input.dispatchTouchEvent', {
     type: 'touchStart',
     touchPoints: [{ x: cx, y: cy, id: 3 }],
