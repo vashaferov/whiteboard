@@ -95,7 +95,11 @@ test('pdf: a teacher downloads the current workspace', async ({ browser, request
   const bytes = fs.readFileSync(await download.path());
   expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
   const text = bytes.toString('latin1');
-  expect(text).toContain('/MediaBox [0 0 960 540]');
+  const mediaBox = /\/MediaBox \[0 0 960 ([\d.]+)\]/.exec(text);
+  expect(mediaBox).not.toBeNull();
+  const pageHeight = Number(mediaBox[1]);
+  expect(pageHeight).toBeGreaterThan(400);
+  expect(pageHeight).toBeLessThan(1100);
   expect(text).toContain('/Subtype /Image');
   expect(download.suggestedFilename()).toMatch(/^whiteboard-.+\.pdf$/);
   await expect.poll(() => page.evaluate(

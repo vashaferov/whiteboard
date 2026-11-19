@@ -67,11 +67,11 @@ export function buildPdf(jpeg, { pixelWidth, pixelHeight, pageWidth, pageHeight 
 }
 
 export async function exportWorkspacePdf(board, name) {
-  const canvas = await board.exportCanvas();
+  const { canvas, width, height } = await board.exportCanvas();
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
   if (!blob) throw new Error('Не удалось подготовить изображение');
 
-  const page = pdfPageSize(board.width, board.height);
+  const page = pdfPageSize(width, height);
   const pdf = buildPdf(new Uint8Array(await blob.arrayBuffer()), {
     pixelWidth: canvas.width,
     pixelHeight: canvas.height,

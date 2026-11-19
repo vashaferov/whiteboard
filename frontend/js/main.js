@@ -1457,6 +1457,7 @@ function handleWorkspaceState(message) {
   const version = message.stateVersion ?? 0;
   if (version <= state.stateVersion) return;
 
+  const switched = state.workspaceId !== message.workspaceId;
   state.stateVersion = version;
   state.workspaceId = message.workspaceId;
   state.pendingWorkspaceId = null;
@@ -1474,7 +1475,7 @@ function handleWorkspaceState(message) {
     if (message.canvas) workspace.canvas = message.canvas;
     else delete workspace.canvas;
   }
-  applyWorkspaceCanvas(workspace);
+  if (switched) applyWorkspaceCanvas(workspace);
 
   const buffered = state.pendingEvents;
   state.pendingEvents = [];

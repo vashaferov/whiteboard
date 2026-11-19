@@ -115,11 +115,11 @@ export class Board {
       height: this.height,
       listening: false,
       perfectDrawEnabled: false,
-      sceneFunc: (ctx) => {
+      sceneFunc: (ctx, shape) => {
         ctx.beginPath();
         const step = this._gridStep || 32;
-        for (let x = step; x < this.width(); x += step) {
-          for (let y = step; y < this.height(); y += step) {
+        for (let x = step; x < shape.width(); x += step) {
+          for (let y = step; y < shape.height(); y += step) {
             ctx.moveTo(x + 1.4, y);
             ctx.arc(x, y, 1.4, 0, Math.PI * 2);
           }
@@ -288,14 +288,7 @@ export class Board {
   fitContent() {
     const containerWidth = Math.max(1, this.container.clientWidth);
     const containerHeight = Math.max(1, this.container.clientHeight);
-    const bounds = this.contentBounds();
-    if (!bounds) {
-      this.zoom = 1;
-      this.panX = -800;
-      this.panY = -450;
-      this._applyView(containerWidth, containerHeight);
-      return;
-    }
+    const bounds = this.contentBounds() ?? { x: 0, y: 0, width: 1600, height: 900 };
     const padding = Math.max(40, Math.max(bounds.width, bounds.height) * 0.1);
     const zoom = clamp(
       Math.min(
@@ -546,6 +539,14 @@ export class Board {
     }
     await Promise.all(images);
 
+    const bounds = this.contentBounds();
+    if (!bounds) throw new Error('Нет объектов для экспорта');
+    const padding = Math.max(32, Math.max(bounds.width, bounds.height) * 0.03);
+    const left = bounds.x - padding;
+    const top = bounds.y - padding;
+    const width = bounds.width + padding * 2;
+    const height = bounds.height + padding * 2;
+
     const stage = this.stage;
     const saved = {
       width: stage.width(),
@@ -557,6 +558,7 @@ export class Board {
       overlay: this.overlayLayer.visible(),
       transformer: this.transformer.visible(),
       grid: this.grid.visible(),
+      paper: this.paper.visible(),
       shadow: this.paper.shadowEnabled(),
     };
     const badges = [];
@@ -567,22 +569,40 @@ export class Board {
         badge.visible(false);
       }
     }
+    const background = new Konva.Rect({
+      x: left,
+      y: top,
+      width,
+      height,
+      fill: '#ffffff',
+      listening: false,
+    });
+    this.backgroundLayer.add(background);
+    background.moveToBottom();
 
     try {
       this.overlayLayer.visible(false);
       this.transformer.visible(false);
       this.grid.visible(false);
+      this.paper.visible(false);
       this.paper.shadowEnabled(false);
-      stage.size({ width: this.width, height: this.height });
+      stage.size({ width: Math.ceil(width), height: Math.ceil(height) });
       stage.scale({ x: 1, y: 1 });
-      stage.position({ x: 0, y: 0 });
+      stage.position({ x: -left, y: -top });
       stage.draw();
-      return stage.toCanvas({ pixelRatio: 2 });
+      const pixelRatio = Math.min(2, 8000 / Math.max(width, height, 1));
+      return {
+        canvas: stage.toCanvas({ pixelRatio }),
+        width,
+        height,
+      };
     } finally {
+      background.destroy();
       for (const [badge, visible] of badges) badge.visible(visible);
       this.overlayLayer.visible(saved.overlay);
       this.transformer.visible(saved.transformer);
       this.grid.visible(saved.grid);
+      this.paper.visible(saved.paper);
       this.paper.shadowEnabled(saved.shadow);
       stage.size({ width: saved.width, height: saved.height });
       stage.scale({ x: saved.scaleX, y: saved.scaleY });

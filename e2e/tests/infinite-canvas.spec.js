@@ -10,7 +10,7 @@ test('infinite page pans past the old sheet, keeps drawing and fits content', as
   await signInWith(request, page, setup.teacherLogin);
   await openRoom(page, setup.room.id);
 
-  await expect(page.locator('#zoom-reset')).toHaveText('100%');
+  await expect(page.locator('#zoom-reset')).toHaveText(/^\d+%$/);
   const paperVisible = await page.evaluate(
     () => window.Konva.stages[0].getLayers()[0].getChildren()[0].visible(),
   );
