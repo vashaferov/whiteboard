@@ -25,6 +25,15 @@ function gridStep(scale) {
   while (step * scale > 64 && step > 4) step /= 2;
   return step;
 }
+/** Контрастный цвет точек сетки для выбранного фона холста. */
+function gridDotColor(color) {
+  const value = Number.parseInt(color.slice(1), 16);
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+  return luminance < 128 ? 'rgba(255, 255, 255, 0.32)' : 'rgba(15, 23, 42, 0.18)';
+}
 const MIN_SCALE = 0.1;
 const MIN_ZOOM = 0.5;
 const INFINITE_MIN_ZOOM = 0.1;
@@ -71,6 +80,9 @@ export class Board {
     this.height = options.height ?? 900;
     this.canvasMode = 'infinite';
     this.presentation = false;
+    this.background = null;
+    this._gridDotColor = '#d3dcea';
+    this.boardElement = container.closest('.board') ?? container;
     this.onObjectMove = options.onObjectMove ?? (() => {});
     this.onObjectsMove = options.onObjectsMove ?? (() => {});
     this.onObjectTransform = options.onObjectTransform ?? (() => {});
@@ -130,7 +142,7 @@ export class Board {
             ctx.arc(x, y, 1.4, 0, Math.PI * 2);
           }
         }
-        ctx.fillStyle = '#d3dcea';
+        ctx.fillStyle = this._gridDotColor;
         ctx.fill();
       },
     });
@@ -497,6 +509,19 @@ export class Board {
     this.resetView();
   }
 
+  setBackground(color) {
+    const valid = typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color) ? color.toLowerCase() : null;
+    this.background = valid;
+    this.paper.fill(valid || '#ffffff');
+    this._gridDotColor = valid ? gridDotColor(valid) : '#d3dcea';
+    if (this.boardElement?.classList) {
+      this.boardElement.classList.toggle('has-custom-bg', Boolean(valid));
+      if (valid) this.boardElement.style.setProperty('--board-bg', valid);
+      else this.boardElement.style.removeProperty('--board-bg');
+    }
+    this.backgroundLayer.batchDraw();
+  }
+
   clearPresentationSlide() {
     this.slideToken += 1;
     this.slideImage?.destroy();
@@ -587,7 +612,7 @@ export class Board {
       y: top,
       width,
       height,
-      fill: '#ffffff',
+      fill: this.presentation ? '#ffffff' : this.background || '#ffffff',
       listening: false,
     });
     this.backgroundLayer.add(background);

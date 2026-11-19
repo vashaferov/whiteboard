@@ -319,6 +319,11 @@ class WorkspaceCanvas(_Message):
     height: int | None = Field(default=None, ge=640, le=4000)
 
 
+class WorkspaceBackground(_Message):
+    type: Literal["workspace_background"]
+    color: str | None = Field(default=None, pattern=COLOR_PATTERN)
+
+
 class TextUpdate(_Message):
     type: Literal["text_update"]
     objectId: str = Field(pattern=OBJECT_ID_PATTERN)
@@ -475,6 +480,7 @@ ClientMessage = Annotated[
     | TextFont
     | BoardResize
     | WorkspaceCanvas
+    | WorkspaceBackground
     | ObjectsDelete
     | ObjectsMove
     | ObjectDelete

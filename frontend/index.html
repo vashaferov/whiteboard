@@ -367,6 +367,11 @@
                   <button class="btn btn--small" type="button" data-board-preset="1587x1123">A4</button>
                   <button class="btn btn--small" type="button" data-board-preset="1200x1200">1:1</button>
                 </div>
+                <label class="board-size-panel__field board-size-panel__color">
+                  Цвет холста
+                  <input id="board-color" type="color" value="#ffffff" aria-label="Цвет холста" />
+                </label>
+                <button id="board-color-reset" class="btn btn--small" type="button">Сброс</button>
               </div>
               <button id="pdf-btn" class="room-menu-item" type="button" hidden>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -496,6 +501,12 @@
             <button id="zoom-reset" class="zoom-controls__value" type="button" title="Вписать доску">100%</button>
             <button id="zoom-in" class="zoom-controls__button" type="button" aria-label="Приблизить">+</button>
           </div>
+          <div id="slide-controls" class="slide-controls" hidden>
+            <span class="slide-controls__live"><i></i><span id="slide-live-text">Презентация</span></span>
+            <button id="slide-prev" class="slide-controls__button" type="button" aria-label="Предыдущий слайд">‹</button>
+            <span id="slide-counter" class="slide-controls__counter"></span>
+            <button id="slide-next" class="slide-controls__button" type="button" aria-label="Следующий слайд">›</button>
+          </div>
         </div>
 
         <div
@@ -554,12 +565,6 @@
           </details>
         </aside>
 
-        <div id="slide-controls" class="slide-controls" hidden>
-          <span class="slide-controls__live"><i></i><span id="slide-live-text">Презентация</span></span>
-          <button id="slide-prev" class="slide-controls__button" type="button" aria-label="Предыдущий слайд">‹</button>
-          <span id="slide-counter" class="slide-controls__counter"></span>
-          <button id="slide-next" class="slide-controls__button" type="button" aria-label="Следующий слайд">›</button>
-        </div>
       </main>
 
       <div id="room-sheet-backdrop" class="room-sheet-backdrop" hidden></div>

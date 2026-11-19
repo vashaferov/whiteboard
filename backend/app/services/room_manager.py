@@ -71,6 +71,7 @@ WORKSPACE_SCOPED_EVENTS = {
     "clear",
     "cursor",
     "workspace_canvas",
+    "workspace_background",
     "cursor_remove",
 }
 
@@ -747,6 +748,8 @@ class RoomManager:
         workspace = room.get_workspace(workspace_id)
         if workspace is not None:
             payload["canvas"] = workspace.get("canvas")
+            if workspace.get("kind") != PRESENTATION_KIND and workspace.get("background"):
+                payload["background"] = workspace["background"]
         if workspace is not None and workspace.get("kind") == PRESENTATION_KIND:
             payload["slideIndex"] = int(workspace.get("slideIndex", 0) or 0)
         return payload
