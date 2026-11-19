@@ -491,6 +491,20 @@
   и пишут одну запись истории, поэтому один `Ctrl+Z` возвращает всю группу.
 - [x] Тесты: 235 backend-тестов и 66 E2E-сценариев.
 
+### P16. Панель слайдов и цвет холста ✅
+
+- [x] Панель листания `#slide-controls` перенесена внутрь `#board`; в презентации
+  сцена резервирует полосу снизу (60 px, на мобильных 52 px), поэтому кнопки
+  стоят ниже слайда и не закрывают его текст.
+- [x] Учитель выбирает цвет холста страницы в «Ещё → Холст страницы»
+  (`input[type=color]` и «Сброс»). Цвет хранится в метаданных workspace полем
+  `background`, нормализуется в `#rrggbb` и синхронизируется сообщением
+  `workspace_background`; ученик менять цвет не может.
+- [x] Цвет применяется к бесконечному холсту и к фиксированному листу, виден всем
+  участникам страницы, переживает перезагрузку и попадает в PDF. На тёмном фоне
+  точки сетки становятся контрастными; слайды презентации не перекрашиваются.
+- [x] Тесты: 238 backend-тестов и 67 E2E-сценариев.
+
 ### Критерии готовности итерации
 
 1. `pytest`, `ruff`, `black` — зелёные; E2E-набор проходит на двух браузерах и мобильном viewport.
@@ -519,6 +533,8 @@
     на странице, PDF идёт по границам контента, презентация занимает весь слайд.
 17. Ластик удаляет любые доступные элементы, `Ctrl+Z` работает в любой раскладке,
     а лассо выбирает, двигает и удаляет группу с одной отменой.
+18. Панель листания презентации стоит ниже слайда; учитель задаёт цвет холста
+    страницы, ученики видят его, цвет переживает перезагрузку и попадает в PDF.
 
 ---
 
@@ -549,6 +565,7 @@
 | Замок для всех, размер холста и невидимка | ✅ | `api/ws.py` (`_locked_for`, `board_resize`, `set_invisible`), `services/{room_manager,storage}.py` (board, фильтрация ростера, presence), `models/schemas.py`, `frontend/js/{board,main}.js`, `frontend/{index.html,css/style.css}`; 228 backend-тестов, 54 E2E-сценария |
 | Бесконечный холст | ✅ | `services/workspaces.py` (`canvas`), `api/ws.py` (`workspace_canvas`), `frontend/js/{board,main}.js` (viewport, сетка, PDF, слайды), `e2e/tests/{infinite-canvas,board-size}.spec.js`; 232 backend-теста, 61 E2E-сценарий |
 | Ластик, Ctrl+Z и лассо | ✅ | `api/ws.py` (`objects_delete`, `objects_move`), `frontend/js/{board,tools,main}.js` (геометрия ластика, лассо, group drag), `e2e/tests/eraser-lasso.spec.js`; 235 backend-тестов, 66 E2E-сценариев |
+| Панель слайдов и цвет холста | ✅ | `frontend/{index.html,css/room.css}` (панель в `#board`), `models/schemas.py` (`WorkspaceBackground`), `services/{workspaces,room_manager}.py`, `api/ws.py` (`workspace_background`), `frontend/js/{board,main}.js`; `e2e/tests/{presentations,board-size}.spec.js`; 238 backend-тестов, 67 E2E-сценариев |
 | 11. Пилот | ⛔ | Не начат |
 
 **Проверка Docker (эта итерация):**
@@ -673,11 +690,22 @@
   проверены каскад, замок и групповое перемещение.
 - `docker compose config --quiet` — без ошибок.
 
+**Проверка панели слайдов и цвета холста (эта итерация):**
+- Backend: **238 passed**, `ruff` и `black` — чистые.
+- E2E (Playwright): **67 passed** — панель листания стоит ниже сцены слайда
+  на широком и узком окне; учитель задаёт цвет, ученик видит тот же фон,
+  цвет переживает перезагрузку и сбрасывается кнопкой «Сброс».
+- `workspace_background` отклоняет ученика (`forbidden`) и невалидный цвет
+  (`invalid_message`), хранит цвет постранично и отдаёт его в `workspace_state`;
+  презентация цвет не принимает.
+- PDF использует цвет страницы как фон; на тёмном фоне точки сетки светлеют.
+- `docker compose config --quiet` — без ошибок.
+
 **Как проверить локально:**
 
 ```bash
 cd backend
-..\.venv\Scripts\python -m pytest       # 235 passed
+..\.venv\Scripts\python -m pytest       # 238 passed
 ..\.venv\Scripts\python -m ruff check .
 ..\.venv\Scripts\python -m black --check .
 ..\.venv\Scripts\python -m uvicorn app.main:app --reload --port 8000
