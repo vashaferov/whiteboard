@@ -1002,6 +1002,7 @@ function applyWorkspaceMode() {
     state.board.clearPresentationSlide();
     updateSlideControls();
     if (wasPresentation) {
+      applyWorkspaceCanvas(currentWorkspace());
       const restore = state.toolBeforePresentation || 'brush';
       state.toolBeforePresentation = null;
       selectTool(restore);

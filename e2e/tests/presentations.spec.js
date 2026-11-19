@@ -49,6 +49,23 @@ test('presentation: teacher uploads a PDF, edits slides and a student only watch
   await expect(visibleTools).toHaveCount(1);
   await expect(visibleTools.first()).toHaveAttribute('data-tool', 'brush');
 
+  const slideCanvas = await teacher.evaluate(() => {
+    const layer = window.Konva.stages[0].getLayers()[0];
+    const background = layer.findOne('.slide-bg');
+    return {
+      width: background.width(),
+      height: background.height(),
+      naturalWidth: background.image().naturalWidth,
+      naturalHeight: background.image().naturalHeight,
+      paper: layer.getChildren()[0].visible(),
+      grid: layer.getChildren()[1].visible(),
+    };
+  });
+  expect(slideCanvas.width).toBe(slideCanvas.naturalWidth);
+  expect(slideCanvas.height).toBe(slideCanvas.naturalHeight);
+  expect(slideCanvas.paper).toBe(false);
+  expect(slideCanvas.grid).toBe(false);
+
   await drawBrush(teacher, { x: 120, y: 120 }, { x: 320, y: 120 });
   await expect.poll(() => objectCount(teacher)).toBe(1);
 
@@ -96,6 +113,13 @@ test('presentation: teacher uploads a PDF, edits slides and a student only watch
   await teacher.click('#slide-next');
   await expect.poll(() => student.locator('#slide-counter').textContent()).toBe('2 / 2');
   await expect.poll(() => objectCount(student)).toBe(1);
+
+  await teacher.locator('.page', { hasText: 'Страница 1' }).locator('.page__select').click();
+  await expect
+    .poll(() =>
+      teacher.evaluate(() => window.Konva.stages[0].getLayers()[0].getChildren()[0].visible()),
+    )
+    .toBe(false);
 
   await teacherContext.close();
   await studentContext.close();

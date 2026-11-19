@@ -487,6 +487,7 @@ export class Board {
     this.slideToken += 1;
     this.slideImage?.destroy();
     this.slideImage = null;
+    this.presentation = false;
     this.grid.visible(true);
     this.backgroundLayer.batchDraw();
   }
@@ -509,19 +510,17 @@ export class Board {
     });
     if (token !== this.slideToken || this.destroyed) return;
 
-    const scale = Math.min(
-      this.width / Math.max(image.naturalWidth, 1),
-      this.height / Math.max(image.naturalHeight, 1),
-    );
-    const width = image.naturalWidth * scale;
-    const height = image.naturalHeight * scale;
+    this.presentation = true;
+    this.setCanvasMode('fixed', image.naturalWidth, image.naturalHeight);
+    this.paper.visible(false);
+    this.grid.visible(false);
     const node = new Konva.Image({
       name: 'slide-bg',
       image,
-      x: (this.width - width) / 2,
-      y: (this.height - height) / 2,
-      width,
-      height,
+      x: 0,
+      y: 0,
+      width: this.width,
+      height: this.height,
       listening: false,
     });
     this.backgroundLayer.add(node);
