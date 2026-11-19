@@ -8,6 +8,7 @@ import { exportWorkspacePdf } from './export.js';
 import { authApi, roomsApi } from './api.js';
 import { initAuth, showAuth } from './auth.js';
 import { initDashboard, showDashboard } from './dashboard.js';
+import { initRoomChrome } from './room-chrome.js';
 
 const ROOM_KEY = 'wb:room';
 const USERS_PANEL_KEY = 'wb:usersPanelWidth';
@@ -15,7 +16,7 @@ const PAGES_COLLAPSED_KEY = 'wb:pagesCollapsed';
 const USERS_COLLAPSED_KEY = 'wb:usersCollapsed';
 const USERS_PANEL_MIN = 200;
 const USERS_PANEL_MAX = 560;
-const USERS_PANEL_DEFAULT = 232;
+const USERS_PANEL_DEFAULT = 248;
 const DEFAULT_BOARD = { width: 1600, height: 900 };
 const ZOOM_STEP = 1.25;
 const PALETTE = ['#111827', '#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777'];
@@ -53,7 +54,7 @@ const state = {
   sync: null,
   color: PALETTE[1],
   width: 4,
-  tool: 'brush',
+  tool: 'select',
   invisible: false,
   ready: false,
   textPoint: null,
@@ -115,6 +116,7 @@ function init() {
   cacheElements();
   buildPalette();
   buildFramePanel();
+  initRoomChrome();
   bindUsersResizer();
   bindSidebarToggles();
   bindToolbar();
@@ -170,6 +172,11 @@ function cacheElements() {
   els.pagesPanel = $('#pages-panel');
   els.status = $('#status');
   els.roomTitle = $('#room-title');
+  els.roomRole = $('#room-role');
+  els.roomContext = $('#room-context');
+  els.styleDot = $('#style-dot');
+  els.styleWidth = $('#style-width');
+  els.roomMoreBtn = $('#room-more-btn');
   els.framePanel = $('#frame-panel');
   els.boardSizeBtn = $('#board-size-btn');
   els.boardSizePanel = $('#board-size-panel');
@@ -210,6 +217,7 @@ function cacheElements() {
   els.slidePrev = $('#slide-prev');
   els.slideNext = $('#slide-next');
   els.slideCounter = $('#slide-counter');
+  els.slideLiveText = $('#slide-live-text');
   els.zoomOut = $('#zoom-out');
   els.zoomReset = $('#zoom-reset');
   els.zoomIn = $('#zoom-in');
@@ -265,6 +273,9 @@ function startRoom({ room, user, permissions, board }) {
   $('#dashboard').hidden = true;
   els.app.hidden = false;
   els.roomTitle.textContent = room.name;
+  updateRoomRole();
+  updateStyleButton();
+  updateRoomContext();
   els.usersHint.textContent = '';
   history.replaceState(null, '', `?room=${encodeURIComponent(room.id)}`);
 
@@ -424,6 +435,7 @@ function bindToolbar() {
   els.widthRange.addEventListener('input', () => {
     state.width = Number(els.widthRange.value) || 4;
     els.widthValue.textContent = `${state.width} px`;
+    updateStyleButton();
     state.tools?.setStyle({ width: state.width });
   });
 
@@ -629,11 +641,13 @@ function buildPalette() {
     button.addEventListener('click', () => {
       state.color = color;
       updatePalette();
+      updateStyleButton();
       state.tools?.setStyle({ color });
     });
     els.colors.appendChild(button);
   }
   updatePalette();
+  updateStyleButton();
   els.widthValue.textContent = `${state.width} px`;
 }
 
@@ -641,6 +655,36 @@ function updatePalette() {
   for (const swatch of els.colors.children) {
     swatch.classList.toggle('is-active', swatch.dataset.color === state.color);
   }
+}
+
+function updateStyleButton() {
+  if (els.styleDot) els.styleDot.style.backgroundColor = state.color;
+  if (els.styleWidth) els.styleWidth.textContent = `${state.width} px`;
+}
+
+function updateRoomRole() {
+  if (!els.roomRole) return;
+  const role = state.user?.role || 'student';
+  const labels = { student: 'Ученик', teacher: 'Учитель', admin: 'Администратор' };
+  els.roomRole.textContent = labels[role] || role;
+  els.roomRole.dataset.role = role;
+}
+
+function updateRoomContext() {
+  if (!els.roomContext) return;
+  const workspace = state.workspaces.find((item) => item.id === state.workspaceId);
+  if (workspace?.kind === 'presentation') {
+    const total = (workspace.slides || []).length;
+    const index = Math.min(
+      Math.max(Number(workspace.slideIndex) || 0, 0),
+      Math.max(total - 1, 0),
+    );
+    els.roomContext.textContent = total
+      ? `Презентация · Слайд ${index + 1} из ${total}`
+      : 'Презентация';
+    return;
+  }
+  els.roomContext.textContent = workspace?.name || 'Страница';
 }
 
 function selectTool(tool) {
@@ -673,6 +717,9 @@ function updateToolbar() {
   els.pdfBtn.hidden = presentation || !isStaff(state.user?.role);
   els.imageBtn.hidden = presentation;
   els.undoBtn.hidden = presentation && !isStaff(state.user?.role);
+  if (els.roomMoreBtn) {
+    els.roomMoreBtn.hidden = presentation || !isStaff(state.user?.role);
+  }
   els.imageBtn.disabled = false;
   updateFontControl();
   updateBoardSizeUI(presentation);
@@ -848,6 +895,8 @@ function updateSlideControls() {
   els.slideNext.hidden = !staff;
   els.slidePrev.disabled = !staff || index <= 0;
   els.slideNext.disabled = !staff || index >= slides.length - 1;
+  if (els.slideLiveText) els.slideLiveText.textContent = staff ? 'Презентация' : 'Просмотр';
+  updateRoomContext();
 }
 
 function requestSlide(direction) {
@@ -869,6 +918,11 @@ function applyWorkspaceMode() {
   const staff = isStaff(state.user?.role);
   const wasPresentation = Boolean(state.wasPresentation);
   state.wasPresentation = presentation;
+  els.app.dataset.presentation = String(presentation);
+  els.app.dataset.role = state.user?.role || '';
+  if (els.roomMoreBtn) els.roomMoreBtn.hidden = presentation || !staff;
+  updateRoomRole();
+  updateRoomContext();
 
   for (const button of els.toolButtons) {
     button.hidden = presentation && (!staff || button.dataset.tool !== 'brush');
@@ -1072,6 +1126,7 @@ function renderPages() {
     busy: Boolean(state.pendingWorkspaceId || state.moveRequestId),
     collapsed: els.pagesPanel.classList.contains('is-collapsed'),
   });
+  updateRoomContext();
 }
 
 function persistSessionWorkspace() {
@@ -1509,7 +1564,9 @@ function renderUsers() {
   }
 
   els.userList.replaceChildren();
-  els.userCount.textContent = users.length ? `(${users.length})` : '';
+  els.userCount.textContent = users.length ? String(users.length) : '';
+
+  const roleLabels = { admin: 'Администратор', teacher: 'Учитель', student: 'Ученик' };
 
   for (const user of users) {
     const item = document.createElement('li');
@@ -1530,23 +1587,28 @@ function renderUsers() {
       item.appendChild(check);
     }
 
-    const dot = document.createElement('span');
-    dot.className = 'user__dot';
-    dot.style.backgroundColor = user.color;
-    item.appendChild(dot);
+    const avatar = document.createElement('span');
+    avatar.className = 'user__avatar';
+    avatar.style.backgroundColor = user.color || '#2563eb';
+    avatar.textContent = (user.name || '?').trim().charAt(0).toUpperCase();
+    avatar.title = user.name;
+    item.appendChild(avatar);
+
+    const text = document.createElement('span');
+    text.className = 'user__text';
 
     const name = document.createElement('span');
     name.className = 'user__name';
     name.textContent = user.name;
     name.title = user.name;
-    item.appendChild(name);
+    text.appendChild(name);
 
-    if (isStaff(user.role)) {
-      const badge = document.createElement('span');
-      badge.className = 'badge';
-      badge.textContent = user.role === 'admin' ? 'администратор' : 'учитель';
-      item.appendChild(badge);
-    }
+    const role = document.createElement('span');
+    role.className = 'user__role';
+    role.textContent = roleLabels[user.role] || user.role;
+    text.appendChild(role);
+
+    item.appendChild(text);
 
     if (isStaff(user.role) && user.invisible) {
       const badge = document.createElement('span');
@@ -1558,7 +1620,7 @@ function renderUsers() {
     if (state.user && user.id === state.user.id) {
       const badge = document.createElement('span');
       badge.className = 'badge badge--self';
-      badge.textContent = 'вы';
+      badge.textContent = 'Вы';
       item.appendChild(badge);
     } else if (state.permissions.canManageUsers) {
       const kick = document.createElement('button');

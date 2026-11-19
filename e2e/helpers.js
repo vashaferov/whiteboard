@@ -310,18 +310,26 @@ export async function createPage(page, name) {
   await page.click('#page-add');
 }
 
+export async function openPageMenu(page, name) {
+  const row = page.locator('#pages-panel .page', { hasText: name });
+  await row.locator('.page__menu').click();
+  return row;
+}
+
 export async function renamePage(page, oldName, newName) {
+  const row = await openPageMenu(page, oldName);
   page.once('dialog', async (dialog) => {
     await dialog.accept(newName);
   });
-  await page.locator('#pages-panel .page', { hasText: oldName }).locator('.page__rename').click();
+  await row.locator('.page__rename').click();
 }
 
 export async function deletePage(page, name) {
+  const row = await openPageMenu(page, name);
   page.once('dialog', async (dialog) => {
     await dialog.accept();
   });
-  await page.locator('#pages-panel .page', { hasText: name }).locator('.page__delete').click();
+  await row.locator('.page__delete').click();
 }
 
 export async function selectStudent(page, name) {
@@ -341,7 +349,8 @@ export async function pullAll(page) {
 
 export async function movePage(page, name, direction) {
   const selector = direction === 'up' ? '.page__up' : '.page__down';
-  await page.locator('#pages-panel .page', { hasText: name }).locator(selector).click();
+  const row = await openPageMenu(page, name);
+  await row.locator(selector).click();
 }
 
 export function collectErrors(page, label = 'page') {

@@ -171,6 +171,7 @@ test('workspaces: deleting a non-empty page discards objects and moves viewers',
     prompt = dialog.message();
     await dialog.accept();
   });
+  await teacher.locator('#pages-panel .page', { hasText: 'Вторая' }).locator('.page__menu').click();
   await teacher.locator('#pages-panel .page', { hasText: 'Вторая' }).locator('.page__delete').click();
 
   // Objects of the page are gone for good and every viewer lands on the first
@@ -184,6 +185,7 @@ test('workspaces: deleting a non-empty page discards objects and moves viewers',
   expect(prompt).toContain('безвозвратно');
 
   // The only page left cannot be deleted: its × control is disabled.
+  await teacher.locator('#pages-panel .page.is-active .page__menu').click();
   await expect(teacher.locator('#pages-panel .page__delete')).toBeDisabled();
 
   await teacherContext.close();

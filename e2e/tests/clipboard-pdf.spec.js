@@ -86,6 +86,7 @@ test('pdf: a teacher downloads the current workspace', async ({ browser, request
   await openRoom(page, setup.room.id);
 
   await drawRect(page, { x: 200, y: 200 }, { x: 360, y: 300 });
+  await page.click('#room-more-btn');
   await expect(page.locator('#pdf-btn')).toBeVisible();
 
   const downloadPromise = page.waitForEvent('download');
@@ -115,6 +116,7 @@ test('pdf: a student has no export button and an empty page is not exported', as
     setup,
   );
   await expect(student.locator('#pdf-btn')).toBeHidden();
+  await teacher.click('#room-more-btn');
   await expect(teacher.locator('#pdf-btn')).toBeVisible();
 
   await teacher.click('#pdf-btn');
