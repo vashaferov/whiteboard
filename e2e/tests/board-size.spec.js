@@ -42,12 +42,16 @@ test('teacher colors the canvas and the student sees the same color', async ({
     setup,
   );
 
+  await teacher.click('#zoom-in');
+  const zoomBefore = await teacher.evaluate(() => window.Konva.stages[0].scaleX());
+
   await teacher.click('#room-more-btn');
   await teacher.click('#board-size-btn');
   await setColor(teacher, '#123456');
   const expected = { color: 'rgb(18, 52, 86)', custom: true };
   await expect.poll(() => background(teacher)).toEqual(expected);
   await expect.poll(() => background(student)).toEqual(expected);
+  expect(await teacher.evaluate(() => window.Konva.stages[0].scaleX())).toBe(zoomBefore);
 
   await reloadAndWait(teacher);
   await expect.poll(() => background(teacher)).toEqual(expected);

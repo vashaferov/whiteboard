@@ -552,6 +552,11 @@ function workspaceCanvas(workspace) {
   return workspace?.canvas || { mode: 'infinite' };
 }
 
+function applyWorkspaceBackground(workspace = currentWorkspace()) {
+  if (!state.board || workspace?.kind === 'presentation') return;
+  state.board.setBackground(workspace?.background || null);
+}
+
 function applyWorkspaceCanvas(workspace = currentWorkspace()) {
   if (!state.board) return;
   if (workspace?.kind === 'presentation') {
@@ -1313,7 +1318,7 @@ function handleServerEvent(message) {
         if (message.color) workspace.background = message.color;
         else delete workspace.background;
       }
-      if (message.workspaceId === state.workspaceId) applyWorkspaceCanvas(workspace);
+      if (message.workspaceId === state.workspaceId) applyWorkspaceBackground(workspace);
       updateBoardSizePanel();
       break;
     }
