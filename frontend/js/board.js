@@ -613,10 +613,13 @@ export class Board {
   getPointer() {
     const pointer = this.stage.getRelativePointerPosition();
     if (!pointer) return null;
-    return {
-      x: clamp(pointer.x, 0, this.width),
-      y: clamp(pointer.y, 0, this.height),
-    };
+    if (this.canvasMode === 'fixed') {
+      return {
+        x: clamp(pointer.x, 0, this.width),
+        y: clamp(pointer.y, 0, this.height),
+      };
+    }
+    return { x: pointer.x, y: pointer.y };
   }
 
   toScreen(point) {
