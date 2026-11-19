@@ -496,6 +496,12 @@
             <button id="zoom-reset" class="zoom-controls__value" type="button" title="Вписать доску">100%</button>
             <button id="zoom-in" class="zoom-controls__button" type="button" aria-label="Приблизить">+</button>
           </div>
+          <div id="slide-controls" class="slide-controls" hidden>
+            <span class="slide-controls__live"><i></i><span id="slide-live-text">Презентация</span></span>
+            <button id="slide-prev" class="slide-controls__button" type="button" aria-label="Предыдущий слайд">‹</button>
+            <span id="slide-counter" class="slide-controls__counter"></span>
+            <button id="slide-next" class="slide-controls__button" type="button" aria-label="Следующий слайд">›</button>
+          </div>
         </div>
 
         <div
@@ -554,12 +560,6 @@
           </details>
         </aside>
 
-        <div id="slide-controls" class="slide-controls" hidden>
-          <span class="slide-controls__live"><i></i><span id="slide-live-text">Презентация</span></span>
-          <button id="slide-prev" class="slide-controls__button" type="button" aria-label="Предыдущий слайд">‹</button>
-          <span id="slide-counter" class="slide-controls__counter"></span>
-          <button id="slide-next" class="slide-controls__button" type="button" aria-label="Следующий слайд">›</button>
-        </div>
       </main>
 
       <div id="room-sheet-backdrop" class="room-sheet-backdrop" hidden></div>

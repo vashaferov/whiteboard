@@ -26,6 +26,30 @@ async function slideName(page) {
   });
 }
 
+test('presentation: slide controls stay below the slide on a narrow screen', async ({
+  browser,
+  request,
+}) => {
+  const setup = await lessonSetup(request, { name: 'Presentation narrow', student: false });
+  const context = await browser.newContext({ viewport: { width: 520, height: 800 } });
+  const page = await context.newPage();
+  await signInWith(request, page, setup.teacherLogin);
+  await openRoom(page, setup.room.id);
+
+  await page.setInputFiles('#presentation-input', PDF);
+  await expect.poll(() => slideName(page)).not.toBeNull();
+
+  const layout = await page.evaluate(() => {
+    const stage = window.Konva.stages[0];
+    const stageBox = stage.container().getBoundingClientRect();
+    const controls = document.querySelector('#slide-controls').getBoundingClientRect();
+    return { stageBottom: stageBox.bottom, controlsTop: controls.top };
+  });
+  expect(layout.controlsTop).toBeGreaterThanOrEqual(layout.stageBottom);
+
+  await context.close();
+});
+
 test('presentation: teacher uploads a PDF, edits slides and a student only watches', async ({
   browser,
   request,
@@ -44,6 +68,14 @@ test('presentation: teacher uploads a PDF, edits slides and a student only watch
   await expect.poll(() => teacher.locator('.page--presentation').count()).toBe(1);
   await expect.poll(() => teacher.locator('#slide-counter').textContent()).toBe('1 / 2');
   await expect.poll(() => slideName(teacher)).not.toBeNull();
+
+  const layout = await teacher.evaluate(() => {
+    const stage = window.Konva.stages[0];
+    const stageBox = stage.container().getBoundingClientRect();
+    const controls = document.querySelector('#slide-controls').getBoundingClientRect();
+    return { stageBottom: stageBox.bottom, controlsTop: controls.top };
+  });
+  expect(layout.controlsTop).toBeGreaterThanOrEqual(layout.stageBottom);
 
   const visibleTools = teacher.locator('[data-tool]:visible');
   await expect(visibleTools).toHaveCount(1);
