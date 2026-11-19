@@ -212,6 +212,15 @@
   color: var(--room-accent);
 }
 
+#app .room-action--danger {
+  color: var(--room-danger);
+}
+
+#app .room-action--danger:hover {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
 #app .room-action[hidden] {
   display: none !important;
 }

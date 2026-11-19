@@ -105,6 +105,7 @@ test('export keeps the current zoom', async ({ page, request }) => {
   await expect(page.locator('#zoom-reset')).toHaveText('125%');
   const before = await stageView(page);
 
+  await page.click('#room-more-btn');
   const download = page.waitForEvent('download');
   await page.click('#pdf-btn');
   await download;

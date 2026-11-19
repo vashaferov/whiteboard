@@ -323,13 +323,14 @@
               <path d="M21 19v-1a3.5 3.5 0 0 0-2.5-3.35" />
             </svg>
           </button>
-          <button id="pdf-btn" class="btn btn--ghost room-action" type="button" title="Экспортировать страницу в PDF" hidden>
+          <button id="clear-btn" class="btn btn--ghost room-action room-action--danger" type="button" title="Очистить доску" hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M6 3h8l4 4v14H6z" />
-              <path d="M14 3v5h5" />
-              <path d="M9 14h6M9 17h4" />
+              <path d="M4 7h16" />
+              <path d="M9 7V5h6v2" />
+              <path d="M6 7l1 13h10l1-13" />
+              <path d="M10 11v5M14 11v5" />
             </svg>
-            <span>PDF</span>
+            <span>Очистить доску</span>
           </button>
           <div class="room-more-wrap">
             <button id="room-more-btn" class="btn btn--ghost room-action" type="button" aria-label="Ещё" aria-haspopup="true" aria-expanded="false" title="Ещё" hidden>
@@ -363,14 +364,13 @@
                   <button class="btn btn--small" type="button" data-board-preset="1200x1200">1:1</button>
                 </div>
               </div>
-              <button id="clear-btn" class="room-menu-item room-menu-item--danger" type="button" hidden>
+              <button id="pdf-btn" class="room-menu-item" type="button" hidden>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M4 7h16" />
-                  <path d="M9 7V5h6v2" />
-                  <path d="M6 7l1 13h10l1-13" />
-                  <path d="M10 11v5M14 11v5" />
+                  <path d="M6 3h8l4 4v14H6z" />
+                  <path d="M14 3v5h5" />
+                  <path d="M9 14h6M9 17h4" />
                 </svg>
-                <span>Очистить доску</span>
+                <span>Сохранить в PDF</span>
               </button>
             </div>
           </div>
