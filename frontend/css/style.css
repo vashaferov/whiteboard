@@ -633,7 +633,8 @@ textarea {
   background: rgba(255, 255, 255, 0.88);
   font-family: var(--font);
   line-height: 1.25;
-  resize: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   overflow: hidden;
   outline: none;
 }

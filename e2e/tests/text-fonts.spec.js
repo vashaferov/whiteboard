@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test';
 
 import {
+  dblclickWorld,
   lessonSetup,
   objectCount,
   openRoom,
   reloadAndWait,
+  settleBoard,
   signInWith,
   worldToScreen,
 } from '../helpers.js';
@@ -30,6 +32,61 @@ function textNode(page) {
         }
       : null;
   });
+}
+
+function textSegments(page) {
+  return page.evaluate(() => {
+    const layer = window.Konva.stages[0].getLayers()[1];
+    const group = layer
+      .getChildren((node) => Boolean(node.id()))
+      .find((node) => node.find('Text').length > 0);
+    if (!group) return [];
+    return group
+      .find('Text')
+      .filter((node) => node.name() !== 'lock-badge')
+      .map((node) => ({
+        text: node.text(),
+        fontFamily: node.fontFamily(),
+        fontStyle: node.fontStyle(),
+        textDecoration: node.textDecoration(),
+        fontSize: node.fontSize(),
+        fill: node.fill(),
+      }));
+  });
+}
+
+function editorText(page) {
+  return page.evaluate(() => document.getElementById('text-editor').textContent);
+}
+
+async function selectEditorText(page, from, to) {
+  await page.evaluate(
+    ({ start, end }) => {
+      const root = document.getElementById('text-editor');
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let offset = 0;
+      let startPoint = null;
+      let endPoint = null;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const length = node.nodeValue.length;
+        if (!startPoint && start <= offset + length) {
+          startPoint = { node, offset: start - offset };
+        }
+        if (!endPoint && end <= offset + length) {
+          endPoint = { node, offset: end - offset };
+        }
+        offset += length;
+      }
+      const range = document.createRange();
+      range.setStart(startPoint.node, startPoint.offset);
+      range.setEnd(endPoint.node, endPoint.offset);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      root.focus();
+    },
+    { start: from, end: to },
+  );
 }
 
 test('text: font applies to new and selected text and is shared', async ({ browser, request }) => {
@@ -94,7 +151,7 @@ test('text: multiline, bold, italic, underline, size and color', async ({ browse
   await teacher.press('#text-editor', 'Enter');
   await teacher.type('#text-editor', 'Вторая');
   await expect(teacher.locator('#text-editor')).toBeVisible();
-  await expect(teacher.locator('#text-editor')).toHaveValue('Первая\nВторая');
+  await expect.poll(() => editorText(teacher)).toBe('Первая\nВторая');
   await teacher.press('#text-editor', 'Control+Enter');
 
   await expect.poll(() => objectCount(teacher)).toBe(1);
@@ -132,6 +189,75 @@ test('text: multiline, bold, italic, underline, size and color', async ({ browse
   await expect.poll(async () => (await textNode(teacher))?.fontStyle).toBe('italic');
   await expect.poll(async () => (await textNode(teacher))?.fontSize).toBe(20);
   await expect.poll(async () => (await textNode(teacher))?.fill).toBe('#16a34a');
+
+  await teacherContext.close();
+  await studentContext.close();
+});
+
+test('text: formatting applies only to the selected fragment', async ({
+  browser,
+  request,
+}) => {
+  const setup = await lessonSetup(request, { name: 'Text ranges' });
+  const teacherContext = await browser.newContext();
+  const studentContext = await browser.newContext();
+  const teacher = await teacherContext.newPage();
+  const student = await studentContext.newPage();
+  await signInWith(request, teacher, setup.teacherLogin);
+  await signInWith(request, student, setup.studentLogin);
+  await openRoom(teacher, setup.room.id);
+  await openRoom(student, setup.room.id);
+
+  const point = await worldToScreen(teacher, { x: 320, y: 240 });
+  await teacher.click('[data-tool="text"]');
+  await teacher.click('#style-btn');
+  await teacher.click('.swatch[data-color="#111827"]');
+  await teacher.mouse.click(point.x, point.y);
+  await teacher.fill('#text-editor', 'Привет мир');
+  await teacher.press('#text-editor', 'Control+Enter');
+  await expect.poll(() => objectCount(teacher)).toBe(1);
+
+  await teacher.click('[data-tool="select"]');
+  await expect(teacher.locator('.font-control')).toBeHidden();
+  await settleBoard(teacher);
+  const textPoint = await worldToScreen(teacher, { x: 340, y: 255 });
+  await teacher.mouse.click(textPoint.x, textPoint.y);
+  await expect(teacher.locator('.font-control')).toBeVisible();
+  await settleBoard(teacher);
+  await dblclickWorld(teacher, { x: 340, y: 255 });
+  await expect(teacher.locator('#text-editor')).toBeVisible();
+
+  await selectEditorText(teacher, 7, 10);
+  await teacher.click('#text-bold');
+  await teacher.fill('#font-size', '32');
+  await teacher.press('#font-size', 'Tab');
+  await teacher.selectOption('#font-select', 'serif');
+  await teacher.click('#style-btn');
+  await teacher.click('.swatch[data-color="#dc2626"]');
+  await teacher.press('#text-editor', 'Control+Enter');
+
+  const expectFragment = async (page) => {
+    await expect
+      .poll(async () => (await textSegments(page)).map((item) => item.text).join(''))
+      .toBe('Привет мир');
+    const segments = await textSegments(page);
+    expect(segments).toHaveLength(2);
+    const plain = segments.find((item) => item.text === 'Привет ');
+    const highlighted = segments.find((item) => item.text === 'мир');
+    expect(plain.fontStyle).toBe('normal');
+    expect(plain.fontSize).toBe(24);
+    expect(plain.fill).toBe('#111827');
+    expect(highlighted.fontStyle).toBe('bold');
+    expect(highlighted.fontSize).toBe(32);
+    expect(highlighted.fill).toBe('#dc2626');
+    expect(highlighted.fontFamily).toContain('Georgia');
+  };
+
+  await expectFragment(teacher);
+  await expectFragment(student);
+
+  await reloadAndWait(teacher);
+  await expectFragment(teacher);
 
   await teacherContext.close();
   await studentContext.close();

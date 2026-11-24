@@ -899,6 +899,8 @@ async def _handle_text_add(
         italic=message.italic,
         underline=message.underline,
     )
+    if message.runs:
+        obj["runs"] = [run.model_dump() for run in message.runs]
     _attach_to_frame(room, obj, user)
     manager.add_object(room, obj, user.workspace_id)
     _push_create(manager, room, user, message.objectId)
@@ -1078,8 +1080,23 @@ async def _handle_text_update(
     if not content:
         await manager.send_to(user, _error("invalid_message", "Текст не может быть пустым"))
         return
-    _push_fields(manager, room, user, [obj], ("content",))
-    updated = manager.update_object_fields(room, message.objectId, content=content)
+    fields: dict[str, Any] = {"content": content}
+    if obj.get("type") == "text":
+        runs = [run.model_dump() for run in message.runs]
+        if runs and "".join(run["text"] for run in runs) != content:
+            await manager.send_to(
+                user, _error("invalid_message", "Фрагменты не совпадают с текстом")
+            )
+            return
+        fields["runs"] = runs
+        fields.update(
+            message.model_dump(
+                include={"fontFamily", "fontSize", "color", "bold", "italic", "underline"},
+                exclude_none=True,
+            )
+        )
+    _push_fields(manager, room, user, [obj], tuple(fields))
+    updated = manager.update_object_fields(room, message.objectId, **fields)
     if updated is None:
         return
     await manager.broadcast(
@@ -1114,6 +1131,9 @@ async def _handle_text_style(
         await manager.send_to(user, _error("forbidden", "Можно менять только свой текст"))
         return
     patch = message.model_dump(exclude_none=True, exclude={"type", "objectId", "workspaceId"})
+    runs = obj.get("runs")
+    if isinstance(runs, list) and runs:
+        patch["runs"] = [{**run, **patch} for run in runs]
     _push_fields(manager, room, user, [obj], tuple(patch))
     updated = manager.update_object_fields(room, message.objectId, **patch)
     if updated is None:

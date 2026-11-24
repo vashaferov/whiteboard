@@ -9,6 +9,25 @@ import { authApi, roomsApi } from './api.js';
 import { initAuth, showAuth } from './auth.js';
 import { initDashboard, showDashboard } from './dashboard.js';
 import { initRoomChrome } from './room-chrome.js';
+import {
+  editorSelectionOffsets,
+  insertEditorText,
+  parseEditor,
+  renderEditor,
+  setEditorSelection,
+} from './rich-text.js';
+import {
+  applyPatchToRuns,
+  applyStyleToRange,
+  commonTextStyle,
+  normalizeTextStyle,
+  runsEqual,
+  sameTextStyle,
+  styleAtOffset,
+  textBaseStyle,
+  trimRuns,
+  uniformTextStyle,
+} from './text-runs.js';
 
 const ROOM_KEY = 'wb:room';
 const USERS_PANEL_KEY = 'wb:usersPanelWidth';
@@ -59,6 +78,9 @@ const state = {
   ready: false,
   textPoint: null,
   textEditObjectId: null,
+  textEditorBase: null,
+  textSelection: null,
+  textSelectionPinned: false,
   leaving: false,
   workspaces: [],
   workspaceId: null,
@@ -393,6 +415,9 @@ function leaveRoom(message = '') {
   state.ready = false;
   state.textPoint = null;
   state.textEditObjectId = null;
+  state.textEditorBase = null;
+  state.textSelection = null;
+  state.textSelectionPinned = false;
   state.workspaces = [];
   state.workspaceId = null;
   state.pendingWorkspaceId = null;
@@ -408,7 +433,7 @@ function leaveRoom(message = '') {
 
   clearRoomState();
   els.textEditor.hidden = true;
-  els.textEditor.value = '';
+  els.textEditor.replaceChildren();
   els.framePanel.hidden = true;
   els.boardSizePanel.hidden = true;
   els.app.hidden = true;
@@ -523,8 +548,91 @@ function clampFontSize(value) {
   return Math.min(200, Math.max(8, parsed));
 }
 
+function editorOpen() {
+  return !els.textEditor.hidden;
+}
+
+function editorBaseStyle() {
+  const base = state.textEditorBase ?? state.tools?.getTextStyle() ?? {};
+  return normalizeTextStyle(base, base);
+}
+
+function readEditor() {
+  return parseEditor(els.textEditor, editorBaseStyle(), state.board?.scale || 1);
+}
+
+function editorSelection() {
+  if (!editorOpen()) return null;
+  if (!state.textSelectionPinned && document.activeElement === els.textEditor) {
+    const current = editorSelectionOffsets(els.textEditor);
+    if (current) {
+      state.textSelection = current;
+      return current;
+    }
+  }
+  return state.textSelection;
+}
+
+/** Запоминает выделение до того, как клик по панели уведёт фокус из редактора. */
+function pinEditorSelection() {
+  if (!editorOpen()) return;
+  const selection = editorSelectionOffsets(els.textEditor);
+  if (selection) state.textSelection = selection;
+  state.textSelectionPinned = Boolean(state.textSelection);
+}
+
+function updateEditorFallbackStyle(base, scale) {
+  els.textEditor.style.fontSize = `${base.fontSize * scale}px`;
+  els.textEditor.style.fontFamily = fontStack(base.fontFamily);
+  els.textEditor.style.fontWeight = base.bold ? '700' : '400';
+  els.textEditor.style.fontStyle = base.italic ? 'italic' : 'normal';
+  els.textEditor.style.textDecoration = base.underline ? 'underline' : 'none';
+  els.textEditor.style.color = base.color;
+}
+
+function applyEditorTextStyle(patch) {
+  if (!state.board) return false;
+  const base = editorBaseStyle();
+  const scale = state.board.scale || 1;
+  const parsed = readEditor();
+  const selection = editorSelection() ?? {
+    start: parsed.content.length,
+    end: parsed.content.length,
+  };
+  let nextBase = base;
+  let nextRuns = [];
+
+  if (!parsed.content) {
+    nextBase = normalizeTextStyle({ ...base, ...patch }, base);
+  } else if (selection.end > selection.start) {
+    nextRuns = applyStyleToRange(
+      parsed.content,
+      parsed.runs,
+      base,
+      selection.start,
+      selection.end,
+      patch,
+    );
+  } else {
+    nextBase = normalizeTextStyle({ ...base, ...patch }, base);
+    nextRuns = applyPatchToRuns(parsed.content, parsed.runs, base, patch);
+  }
+
+  state.textEditorBase = nextBase;
+  renderEditor(els.textEditor, parsed.content, nextRuns, nextBase, scale);
+  updateEditorFallbackStyle(nextBase, scale);
+  state.textSelection = { start: selection.start, end: selection.end };
+  if (parsed.content) setEditorSelection(els.textEditor, selection.start, selection.end);
+  else els.textEditor.focus({ preventScroll: true });
+  els.textEditor.style.height = 'auto';
+  els.textEditor.style.height = `${els.textEditor.scrollHeight}px`;
+  updateFontControl();
+  return true;
+}
+
 function applyTextStyle(patch) {
   if (isPresentation()) return false;
+  if (editorOpen()) return applyEditorTextStyle(patch);
   const id = state.board?.getSelectedId();
   const object = id ? state.board.getObjectData(id) : null;
   if (!object || object.type !== 'text' || !canEditObject(object)) return false;
@@ -534,28 +642,65 @@ function applyTextStyle(patch) {
 }
 
 function toggleTextFormat(name) {
-  const id = state.board?.getSelectedId();
-  const object = id ? state.board.getObjectData(id) : null;
-  const current = object?.type === 'text' ? object[name] : state.tools?.[name];
-  const value = !current;
+  let current;
+  if (editorOpen()) {
+    const base = editorBaseStyle();
+    const { content, runs } = readEditor();
+    const selection = editorSelection();
+    if (!content) {
+      current = base;
+    } else if (selection && selection.end > selection.start) {
+      current = styleAtOffset(content, runs, base, selection.start);
+    } else {
+      current = commonTextStyle(content, runs, base);
+    }
+  } else {
+    const id = state.board?.getSelectedId();
+    const object = id ? state.board.getObjectData(id) : null;
+    current =
+      object?.type === 'text'
+        ? commonTextStyle(object.content || '', object.runs, textBaseStyle(object))
+        : state.tools?.getTextStyle();
+  }
+  const value = !current?.[name];
   state.tools?.setTextFormat({ [name]: value });
   applyTextStyle({ [name]: value });
   updateFontControl();
 }
 
+function currentControlStyle() {
+  if (editorOpen()) {
+    const base = editorBaseStyle();
+    const { content, runs } = readEditor();
+    if (!content) return base;
+    const selection = editorSelection();
+    if (selection && selection.end > selection.start) {
+      return styleAtOffset(content, runs, base, selection.start);
+    }
+    return commonTextStyle(content, runs, base);
+  }
+  const id = state.board?.getSelectedId();
+  const object = id ? state.board.getObjectData(id) : null;
+  if (object?.type === 'text') {
+    return commonTextStyle(object.content || '', object.runs, textBaseStyle(object));
+  }
+  return state.tools?.getTextStyle() ?? {};
+}
+
 function updateFontControl() {
   if (!els.fontControl) return;
   const presentation = isPresentation();
+  const editing = editorOpen();
   const id = state.board?.getSelectedId();
   const object = id ? state.board.getObjectData(id) : null;
   const selected = object?.type === 'text' && !presentation ? object : null;
-  const visible = Boolean(selected) || (!presentation && state.tool === 'text');
+  const visible = editing || Boolean(selected) || (!presentation && state.tool === 'text');
   els.fontControl.hidden = !visible;
   if (!visible) return;
-  const style = selected ?? state.tools?.getTextStyle() ?? {};
+  const style = currentControlStyle();
   els.fontSelect.value = style.fontFamily || 'sans';
   els.fontSize.value = String(clampFontSize(style.fontSize ?? 24));
-  const locked = Boolean(selected) && !canEditObject(selected);
+  const locked = !editing && Boolean(selected) && !canEditObject(selected);
   els.fontSelect.disabled = locked;
   els.fontSize.disabled = locked;
   for (const [name, button] of Object.entries(textFormatButtons())) {
@@ -1111,22 +1256,53 @@ async function exportPdf() {
 function bindTextEditor() {
   els.textEditor.addEventListener('keydown', (event) => {
     event.stopPropagation();
+    state.textSelectionPinned = false;
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       commitText();
     } else if (event.key === 'Escape') {
       event.preventDefault();
       closeTextEditor();
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      insertEditorText(els.textEditor, '\n');
     }
+  });
+  els.textEditor.addEventListener('pointerdown', () => {
+    state.textSelectionPinned = false;
   });
   els.textEditor.addEventListener('input', () => {
     els.textEditor.style.height = 'auto';
     els.textEditor.style.height = `${els.textEditor.scrollHeight}px`;
+    updateFontControl();
+  });
+  els.textEditor.addEventListener('paste', (event) => {
+    event.preventDefault();
+    state.textSelectionPinned = false;
+    const text = event.clipboardData?.getData('text/plain') ?? '';
+    if (text) insertEditorText(els.textEditor, text);
+  });
+  document.addEventListener('selectionchange', () => {
+    if (!editorOpen() || document.activeElement !== els.textEditor) return;
+    if (state.textSelectionPinned) return;
+    const selection = editorSelectionOffsets(els.textEditor);
+    if (!selection) return;
+    state.textSelection = selection;
+    updateFontControl();
   });
   document.addEventListener(
     'pointerdown',
     (event) => {
-      if (!els.textEditor.hidden && event.target !== els.textEditor) commitText();
+      if (els.textEditor.hidden) return;
+      if (els.textEditor.contains(event.target)) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest('.font-control, #style-btn, #style-popover')
+      ) {
+        pinEditorSelection();
+        return;
+      }
+      commitText();
     },
     true,
   );
@@ -1136,7 +1312,14 @@ function openTextEditor(point) {
   if (!state.board || !state.tools) return;
   state.textEditObjectId = null;
   state.textPoint = point;
-  showTextEditorAt(point.x, point.y, state.tools.getTextStyle(), '');
+  state.textSelection = null;
+  showTextEditorAt(
+    point.x,
+    point.y,
+    normalizeTextStyle(state.tools.getTextStyle(), state.tools.getTextStyle()),
+    '',
+    [],
+  );
 }
 
 function openTextEditorForObject(object) {
@@ -1148,71 +1331,101 @@ function openTextEditorForObject(object) {
   }
   state.textEditObjectId = object.id;
   state.textPoint = null;
-  showTextEditorAt(object.x, object.y, {
-    color: object.color || state.color,
-    fontSize: object.fontSize || 24,
-    fontFamily: object.fontFamily || 'sans',
-    bold: Boolean(object.bold),
-    italic: Boolean(object.italic),
-    underline: Boolean(object.underline),
-  }, object.content || '');
+  state.textSelection = null;
+  showTextEditorAt(
+    object.x,
+    object.y,
+    textBaseStyle(object),
+    object.content || '',
+    object.runs || [],
+  );
 }
 
-function showTextEditorAt(x, y, style, value) {
+function showTextEditorAt(x, y, base, content, runs) {
   const local = state.board.toScreen({ x, y });
   const container = els.board.getBoundingClientRect();
-  const scale = state.board.scale;
+  const scale = state.board.scale || 1;
+  const style = normalizeTextStyle(base, base);
 
+  state.textEditorBase = style;
+  state.textSelection = { start: content.length, end: content.length };
+  state.textSelectionPinned = false;
   els.textEditor.hidden = false;
-  els.textEditor.value = value;
   els.textEditor.style.left = `${container.left + local.x}px`;
   els.textEditor.style.top = `${container.top + local.y}px`;
   els.textEditor.style.width = `${Math.max(180, Math.min(420, 320 * scale))}px`;
-  els.textEditor.style.fontSize = `${style.fontSize * scale}px`;
-  els.textEditor.style.fontFamily = fontStack(style.fontFamily);
-  els.textEditor.style.fontWeight = style.bold ? '700' : '400';
-  els.textEditor.style.fontStyle = style.italic ? 'italic' : 'normal';
-  els.textEditor.style.textDecoration = style.underline ? 'underline' : 'none';
-  els.textEditor.style.color = style.color;
   els.textEditor.style.height = 'auto';
+  updateEditorFallbackStyle(style, scale);
+  renderEditor(els.textEditor, content, runs, style, scale);
   requestAnimationFrame(() => {
     els.textEditor.focus({ preventScroll: true });
-    els.textEditor.setSelectionRange(value.length, value.length);
+    setEditorSelection(els.textEditor, content.length, content.length);
     els.textEditor.style.height = `${els.textEditor.scrollHeight}px`;
+    updateFontControl();
   });
 }
 
 function commitText() {
   if (els.textEditor.hidden || !state.board) return;
-  const content = els.textEditor.value.trim();
+  const base = editorBaseStyle();
+  const parsed = parseEditor(els.textEditor, base, state.board.scale || 1);
+  const trimmed = trimRuns(parsed.content, parsed.runs, base);
   const point = state.textPoint;
   const editId = state.textEditObjectId;
+  if (!trimmed.content) {
+    closeTextEditor();
+    return;
+  }
+  if (trimmed.content.length > 2000) {
+    toast('Текст не длиннее 2000 символов');
+    return;
+  }
+
+  let nextBase = base;
+  let runs = trimmed.runs;
+  const uniform = uniformTextStyle(runs);
+  if (uniform) {
+    nextBase = uniform;
+    runs = [];
+  }
   closeTextEditor();
-  if (!content) return;
 
   if (editId) {
     const current = state.board.getObjectData(editId);
-    if (!current || current.content === content) return;
-    state.board.applyObjectTransform({ ...current, content });
-    sendWorkspace({ type: 'text_update', objectId: editId, content });
+    if (!current) return;
+    if (
+      current.content === trimmed.content &&
+      runsEqual(current.runs, runs) &&
+      sameTextStyle(textBaseStyle(current), nextBase)
+    ) {
+      return;
+    }
+    state.board.applyObjectTransform({
+      ...current,
+      content: trimmed.content,
+      runs,
+      ...nextBase,
+    });
+    sendWorkspace({
+      type: 'text_update',
+      objectId: editId,
+      content: trimmed.content,
+      runs,
+      ...nextBase,
+    });
     return;
   }
 
   if (!point) return;
-  const style = state.tools.getTextStyle();
   const objectId = newId();
   const object = {
     id: objectId,
     type: 'text',
-    content,
+    content: trimmed.content,
+    runs,
     x: round(point.x),
     y: round(point.y),
-    color: style.color,
-    fontSize: style.fontSize,
-    fontFamily: style.fontFamily,
-    bold: style.bold,
-    italic: style.italic,
-    underline: style.underline,
+    ...nextBase,
     rotation: 0,
     author: state.user?.id ?? null,
   };
@@ -1220,23 +1433,22 @@ function commitText() {
   sendWorkspace({
     type: 'text_add',
     objectId,
-    content,
+    content: trimmed.content,
+    runs,
     x: object.x,
     y: object.y,
-    color: style.color,
-    fontSize: style.fontSize,
-    fontFamily: style.fontFamily,
-    bold: style.bold,
-    italic: style.italic,
-    underline: style.underline,
+    ...nextBase,
   });
 }
 
 function closeTextEditor() {
   els.textEditor.hidden = true;
-  els.textEditor.value = '';
+  els.textEditor.replaceChildren();
   state.textPoint = null;
   state.textEditObjectId = null;
+  state.textEditorBase = null;
+  state.textSelection = null;
+  state.textSelectionPinned = false;
 }
 
 // ----------------------------------------------------------------- workspaces
