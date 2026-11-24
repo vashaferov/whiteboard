@@ -44,7 +44,7 @@ ADD_EVENTS = {
     "connector_add",
     "frame_add",
 }
-OBJECT_EVENTS = {"object_transform", "text_update"}
+OBJECT_EVENTS = {"object_transform", "text_update", "text_style"}
 STAFF_ROLES = {"teacher", "admin"}
 
 # Events whose delivery is filtered by the recipient's current workspace. Room-level
@@ -64,6 +64,7 @@ WORKSPACE_SCOPED_EVENTS = {
     "object_update",
     "object_transform",
     "text_update",
+    "text_style",
     "object_delete",
     "object_lock",
     "objects_restored",

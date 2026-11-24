@@ -91,7 +91,7 @@ test('main lesson: drawing, cursor, transforms, text editing, reload', async ({
   await clickWorld(teacher, { x: 600, y: 500 });
   await expect(teacher.locator('#text-editor')).toBeVisible();
   await teacher.fill('#text-editor', 'Первый вариант');
-  await teacher.press('#text-editor', 'Enter');
+  await teacher.press('#text-editor', 'Control+Enter');
   await waitForObjectCount(student, 2);
   await hasText(student, 'Первый вариант');
 
@@ -99,7 +99,7 @@ test('main lesson: drawing, cursor, transforms, text editing, reload', async ({
   await dblclickWorld(teacher, { x: 620, y: 515 });
   await expect(teacher.locator('#text-editor')).toBeVisible();
   await teacher.fill('#text-editor', 'Обновлённый текст');
-  await teacher.press('#text-editor', 'Enter');
+  await teacher.press('#text-editor', 'Control+Enter');
   await hasText(student, 'Обновлённый текст');
 
   // Reload keeps the session, room and board (cookie + snapshot restore).

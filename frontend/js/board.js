@@ -14,6 +14,15 @@ export const FONT_STACKS = {
 export function fontStack(fontFamily) {
   return FONT_STACKS[fontFamily] ?? FONT_STACKS.sans;
 }
+function textFontStyle(object) {
+  if (object.bold && object.italic) return 'bold italic';
+  if (object.bold) return 'bold';
+  if (object.italic) return 'italic';
+  return 'normal';
+}
+function textDecoration(object) {
+  return object.underline ? 'underline' : '';
+}
 function isEditableTarget(target) {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
@@ -854,15 +863,21 @@ export class Board {
     const text = new Konva.Text({
       x: 0,
       y: 0,
-      text: object.content,
-      fill: object.color,
-      fontSize: object.fontSize,
-      fontFamily: fontStack(object.fontFamily),
       lineHeight: 1.25,
       listening: true,
     });
+    this._applyTextStyle(text, object);
     group.add(text);
     return group;
+  }
+
+  _applyTextStyle(text, object) {
+    text.text(object.content ?? '');
+    text.fill(object.color || '#111827');
+    text.fontSize(object.fontSize || 24);
+    text.fontFamily(fontStack(object.fontFamily));
+    text.fontStyle(textFontStyle(object));
+    text.textDecoration(textDecoration(object));
   }
 
   _createImageNode(object) {
@@ -1205,11 +1220,12 @@ export class Board {
     if (this.selectedId === object.id) this.transformer.forceUpdate();
   }
 
-  setTextFont(objectId, fontFamily) {
+  setTextStyle(objectId, patch) {
     const entry = this.objects.get(objectId);
     if (!entry || entry.data.type !== 'text') return;
-    entry.data.fontFamily = fontFamily;
-    entry.node.findOne('Text')?.fontFamily(fontStack(fontFamily));
+    entry.data = { ...entry.data, ...patch };
+    const text = entry.node.findOne('Text');
+    if (text) this._applyTextStyle(text, entry.data);
     this.contentLayer.batchDraw();
   }
 
@@ -1251,10 +1267,7 @@ export class Board {
 
     if (entry.data.type === 'text') {
       const text = node.findOne('Text');
-      if (text) {
-        if (entry.data.content !== undefined) text.text(entry.data.content);
-        if (entry.data.fontSize !== undefined) text.fontSize(entry.data.fontSize);
-      }
+      if (text) this._applyTextStyle(text, entry.data);
     } else if (entry.data.type === 'shape') {
       this._resizeShapeNode(node, entry.data);
       this._applyBlockLabel(node, entry.data);

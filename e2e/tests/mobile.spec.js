@@ -60,7 +60,7 @@ test('mobile: toolbar is usable and drawing works on a phone viewport', async ({
   expect(editor.x).toBeGreaterThanOrEqual(0);
   expect(editor.y).toBeGreaterThanOrEqual(0);
   await page.fill('#text-editor', 'С телефона');
-  await page.press('#text-editor', 'Enter');
+  await page.press('#text-editor', 'Control+Enter');
 
   expect(await objectCount(page)).toBe(2);
   await page.tap('[data-tool="select"]');

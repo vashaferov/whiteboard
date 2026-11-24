@@ -37,7 +37,7 @@ from app.models.schemas import (
     StrokePoint,
     StrokeStart,
     TextAdd,
-    TextFont,
+    TextStyle,
     TextUpdate,
     Undo,
     WorkspaceBackground,
@@ -490,8 +490,8 @@ async def _handle_message(
         await _handle_objects_move(manager, room, user, message)
     elif isinstance(message, TextUpdate):
         await _handle_text_update(manager, room, user, message)
-    elif isinstance(message, TextFont):
-        await _handle_text_font(manager, room, user, message)
+    elif isinstance(message, TextStyle):
+        await _handle_text_style(manager, room, user, message)
     elif isinstance(message, BoardResize):
         await _handle_board_resize(manager, room, user, message)
     elif isinstance(message, WorkspaceCanvas):
@@ -895,6 +895,9 @@ async def _handle_text_add(
         color=message.color,
         fontSize=message.fontSize,
         fontFamily=message.fontFamily,
+        bold=message.bold,
+        italic=message.italic,
+        underline=message.underline,
     )
     _attach_to_frame(room, obj, user)
     manager.add_object(room, obj, user.workspace_id)
@@ -1092,11 +1095,11 @@ async def _handle_text_update(
     )
 
 
-async def _handle_text_font(
+async def _handle_text_style(
     manager: RoomManager,
     room: Room,
     user: ConnectedUser,
-    message: TextFont,
+    message: TextStyle,
 ) -> None:
     obj = await _check_object_workspace(manager, room, user, message)
     if obj is None:
@@ -1110,14 +1113,17 @@ async def _handle_text_font(
     if not _can_edit_object(user, obj):
         await manager.send_to(user, _error("forbidden", "Можно менять только свой текст"))
         return
-    _push_fields(manager, room, user, [obj], ("fontFamily",))
-    manager.update_object_fields(room, message.objectId, fontFamily=message.fontFamily)
+    patch = message.model_dump(exclude_none=True, exclude={"type", "objectId", "workspaceId"})
+    _push_fields(manager, room, user, [obj], tuple(patch))
+    updated = manager.update_object_fields(room, message.objectId, **patch)
+    if updated is None:
+        return
     await manager.broadcast(
         room,
         {
-            "type": "text_font",
-            "objectId": message.objectId,
-            "fontFamily": message.fontFamily,
+            "type": "text_style",
+            "id": user.id,
+            "object": updated,
             "workspaceId": user.workspace_id,
         },
         exclude=user.id,

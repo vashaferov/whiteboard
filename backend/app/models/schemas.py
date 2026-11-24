@@ -224,6 +224,9 @@ class TextAdd(_Message):
     color: str = Field(pattern=COLOR_PATTERN)
     fontSize: float = Field(ge=8, le=200)
     fontFamily: TextFontFamily = "sans"
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
 
 
 class ImageAdd(_Message):
@@ -330,10 +333,22 @@ class TextUpdate(_Message):
     content: str = Field(min_length=1, max_length=2000)
 
 
-class TextFont(_Message):
-    type: Literal["text_font"]
+class TextStyle(_Message):
+    type: Literal["text_style"]
     objectId: str = Field(pattern=OBJECT_ID_PATTERN)
-    fontFamily: TextFontFamily
+    fontFamily: TextFontFamily | None = None
+    fontSize: float | None = Field(default=None, ge=8, le=200)
+    color: str | None = Field(default=None, pattern=COLOR_PATTERN)
+    bold: bool | None = None
+    italic: bool | None = None
+    underline: bool | None = None
+
+    @model_validator(mode="after")
+    def _check_change(self) -> TextStyle:
+        names = ("fontFamily", "fontSize", "color", "bold", "italic", "underline")
+        if all(getattr(self, name) is None for name in names):
+            raise ValueError("Нет изменений стиля")
+        return self
 
 
 class ObjectDelete(_Message):
@@ -477,7 +492,7 @@ ClientMessage = Annotated[
     | FrameStyle
     | ObjectTransform
     | TextUpdate
-    | TextFont
+    | TextStyle
     | BoardResize
     | WorkspaceCanvas
     | WorkspaceBackground

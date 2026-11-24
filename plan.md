@@ -506,6 +506,21 @@
   контрастными; слайды презентации не перекрашиваются.
 - [x] Тесты: 238 backend-тестов и 67 E2E-сценариев.
 
+### P17. Многострочный текст и его стили ✅
+
+- [x] `Enter` переносит строку, `Ctrl/Cmd+Enter` завершает ввод; редактор и Konva
+  рисуют многострочный текст, ограничение в 2000 символов сохранено.
+- [x] У объекта `text` появились `bold`, `italic`, `underline`; в тулбаре
+  переключатели «Ж/К/Ч», размер шрифта 8–200 и прежний выбор семейства.
+  Начертание и размер сразу видны в редакторе.
+- [x] Стиль нового текста берётся из тулбара, у выделенного — меняется сразу:
+  цвет, шрифт, размер и начертание идут сообщением `text_style`, пишутся
+  в историю и синхронизируются. На презентации и для чужих/заблокированных
+  текстов правки запрещены.
+- [x] Старые тексты без новых полей рисуются обычными; на мобильном панель
+  текста вынесена над доком, чтобы не ломать прокрутку инструментов.
+- [x] Тесты: 239 backend-тестов и 68 E2E-сценариев.
+
 ### Критерии готовности итерации
 
 1. `pytest`, `ruff`, `black` — зелёные; E2E-набор проходит на двух браузерах и мобильном viewport.
@@ -567,6 +582,7 @@
 | Бесконечный холст | ✅ | `services/workspaces.py` (`canvas`), `api/ws.py` (`workspace_canvas`), `frontend/js/{board,main}.js` (viewport, сетка, PDF, слайды), `e2e/tests/{infinite-canvas,board-size}.spec.js`; 232 backend-теста, 61 E2E-сценарий |
 | Ластик, Ctrl+Z и лассо | ✅ | `api/ws.py` (`objects_delete`, `objects_move`), `frontend/js/{board,tools,main}.js` (геометрия ластика, лассо, group drag), `e2e/tests/eraser-lasso.spec.js`; 235 backend-тестов, 66 E2E-сценариев |
 | Панель слайдов и цвет холста | ✅ | `frontend/{index.html,css/room.css}` (панель в `#board`), `models/schemas.py` (`WorkspaceBackground`), `services/{workspaces,room_manager}.py`, `api/ws.py` (`workspace_background`), `frontend/js/{board,main}.js`; `e2e/tests/{presentations,board-size}.spec.js`; 238 backend-тестов, 67 E2E-сценариев |
+| Многострочный текст и стили | ✅ | `models/schemas.py` (`TextStyle`, `bold`/`italic`/`underline`), `api/ws.py` (`_handle_text_style`), `frontend/js/{board,tools,main}.js`, `frontend/{index.html,css/room.css}`, `e2e/tests/text-fonts.spec.js`; 239 backend-тестов, 68 E2E-сценариев |
 | 11. Пилот | ⛔ | Не начат |
 
 **Проверка Docker (эта итерация):**
