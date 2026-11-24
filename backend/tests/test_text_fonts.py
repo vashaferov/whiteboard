@@ -27,6 +27,20 @@ def style(object_id: str = "t1", **overrides) -> dict:
     return payload
 
 
+def run(text: str, **overrides) -> dict:
+    payload = {
+        "text": text,
+        "color": "#111827",
+        "fontSize": 24,
+        "fontFamily": "sans",
+        "bold": False,
+        "italic": False,
+        "underline": False,
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_text_created_with_style_and_default(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
@@ -156,6 +170,141 @@ def test_style_change_is_undoable(client: TestClient, login_user) -> None:
 
         tw.send_json({"type": "undo"})
         assert recv_until(tw, "objects_restored")["removedIds"] == ["t1"]
+
+
+def test_text_runs_are_saved_and_undoable(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+    with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
+        tw.receive_json()
+        sw.receive_json()
+        barrier(tw)
+        tw.send_json(text("t1", content="Привет мир"))
+        recv_until(sw, "text_add")
+
+        runs = [run("Привет "), run("мир", color="#dc2626", fontSize=32, bold=True)]
+        tw.send_json(
+            {
+                "type": "text_update",
+                "objectId": "t1",
+                "content": "Привет мир",
+                "runs": runs,
+                "fontFamily": "serif",
+            }
+        )
+        updated = recv_until(sw, "text_update")["object"]
+        assert updated["content"] == "Привет мир"
+        assert updated["runs"] == runs
+        assert updated["fontFamily"] == "serif"
+
+        tw.send_json({"type": "undo"})
+        restored = recv_until(tw, "objects_restored")["objects"][0]["object"]
+        assert restored["content"] == "Привет мир"
+        assert not restored.get("runs")
+        assert restored["fontFamily"] == "sans"
+
+
+def test_text_runs_must_match_content(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    with ws_connect(client, teacher["token"]) as tw:
+        tw.receive_json()
+        barrier(tw)
+        tw.send_json(text("t1", content="Привет мир"))
+        barrier(tw)
+
+        tw.send_json(
+            {
+                "type": "text_update",
+                "objectId": "t1",
+                "content": "Привет мир",
+                "runs": [run("Привет")],
+            }
+        )
+        assert recv_until(tw, "error")["code"] == "invalid_message"
+
+        tw.send_json(
+            {
+                "type": "text_update",
+                "objectId": "t1",
+                "content": "Привет мир",
+                "runs": [run("Привет "), run("мир", color="red")],
+            }
+        )
+        assert recv_until(tw, "error")["code"] == "invalid_message"
+
+        tw.send_json(
+            {
+                "type": "text_update",
+                "objectId": "t1",
+                "content": "Привет мир",
+                "runs": [run("Привет "), run("мир", fontSize=5)],
+            }
+        )
+        assert recv_until(tw, "error")["code"] == "invalid_message"
+
+        tw.send_json(
+            {
+                "type": "text_update",
+                "objectId": "t1",
+                "content": "Привет мир",
+                "runs": [run("Привет "), run("мир", fontFamily="comic")],
+            }
+        )
+        assert recv_until(tw, "error")["code"] == "invalid_message"
+
+
+def test_text_add_accepts_runs(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+    with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
+        tw.receive_json()
+        sw.receive_json()
+        barrier(tw)
+
+        runs = [run("При"), run("вет", italic=True, underline=True)]
+        tw.send_json(text("t1", content="Привет", runs=runs))
+        created = recv_until(sw, "text_add")["object"]
+        assert created["runs"] == runs
+
+        tw.send_json(text("t2", content="Привет", runs=[run("При")]))
+        assert recv_until(tw, "error")["code"] == "invalid_message"
+
+
+def test_style_patch_updates_every_run_and_keeps_other_formatting(
+    client: TestClient, login_user
+) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+    with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
+        tw.receive_json()
+        sw.receive_json()
+        barrier(tw)
+        tw.send_json(text("t1", content="Привет мир"))
+        recv_until(sw, "text_add")
+        runs = [run("Привет "), run("мир", bold=True, fontSize=32)]
+        tw.send_json(
+            {
+                "type": "text_update",
+                "objectId": "t1",
+                "content": "Привет мир",
+                "runs": runs,
+            }
+        )
+        recv_until(sw, "text_update")
+
+        tw.send_json(style("t1", color="#2563eb", fontFamily="mono"))
+        changed = recv_until(sw, "text_style")["object"]
+        assert changed["color"] == "#2563eb"
+        assert changed["runs"][0]["color"] == "#2563eb"
+        assert changed["runs"][1]["color"] == "#2563eb"
+        assert changed["runs"][1]["bold"] is True
+        assert changed["runs"][1]["fontSize"] == 32
+        assert changed["runs"][0]["fontFamily"] == "mono"
+        assert changed["runs"][1]["fontFamily"] == "mono"
+
+        tw.send_json(style("t1", bold=False))
+        cleared = recv_until(sw, "text_style")["object"]
+        assert all(item["bold"] is False for item in cleared["runs"])
 
 
 def test_empty_style_is_rejected(client: TestClient, login_user) -> None:

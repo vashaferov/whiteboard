@@ -3,6 +3,8 @@
  * Координаты объектов — мировые на логической доске (например 1600×900).
  */
 
+import { materializeRuns, normalizeTextStyle, textBaseStyle } from './text-runs.js';
+
 const FONT_FAMILY = 'Inter, "Segoe UI", Roboto, Arial, sans-serif';
 export const FONT_STACKS = {
   sans: FONT_FAMILY,
@@ -22,6 +24,17 @@ function textFontStyle(object) {
 }
 function textDecoration(object) {
   return object.underline ? 'underline' : '';
+}
+function splitRunsIntoLines(runs) {
+  const lines = [[]];
+  for (const run of runs) {
+    const parts = run.text.split('\n');
+    parts.forEach((part, index) => {
+      if (part) lines[lines.length - 1].push({ ...run, text: part });
+      if (index < parts.length - 1) lines.push([]);
+    });
+  }
+  return lines;
 }
 function isEditableTarget(target) {
   if (!(target instanceof HTMLElement)) return false;
@@ -860,24 +873,75 @@ export class Board {
       y: object.y,
       rotation: object.rotation || 0,
     });
-    const text = new Konva.Text({
-      x: 0,
-      y: 0,
-      lineHeight: 1.25,
-      listening: true,
-    });
-    this._applyTextStyle(text, object);
-    group.add(text);
+    this._renderTextNode(group, object);
     return group;
   }
 
-  _applyTextStyle(text, object) {
-    text.text(object.content ?? '');
-    text.fill(object.color || '#111827');
-    text.fontSize(object.fontSize || 24);
-    text.fontFamily(fontStack(object.fontFamily));
-    text.fontStyle(textFontStyle(object));
-    text.textDecoration(textDecoration(object));
+  _renderTextNode(group, object) {
+    for (const child of group.getChildren()) child.destroy();
+    const base = textBaseStyle(object);
+    const runs = materializeRuns(object.content ?? '', object.runs, base);
+    if (!runs.length) return;
+
+    if (runs.length === 1) {
+      const run = runs[0];
+      group.add(
+        new Konva.Text({
+          x: 0,
+          y: 0,
+          text: run.text,
+          fill: run.color,
+          fontSize: run.fontSize,
+          fontFamily: fontStack(run.fontFamily),
+          fontStyle: textFontStyle(run),
+          textDecoration: textDecoration(run),
+          lineHeight: 1.25,
+          listening: true,
+        }),
+      );
+      return;
+    }
+
+    let y = 0;
+    let maxWidth = 0;
+    for (const line of splitRunsIntoLines(runs)) {
+      const lineSize = line.length
+        ? Math.max(...line.map((run) => run.fontSize))
+        : base.fontSize;
+      const lineHeight = lineSize * 1.25;
+      let x = 0;
+      for (const run of line) {
+        const node = new Konva.Text({
+          x,
+          y: y + (lineHeight - run.fontSize * 1.25) / 2,
+          text: run.text,
+          fill: run.color,
+          fontSize: run.fontSize,
+          fontFamily: fontStack(run.fontFamily),
+          fontStyle: textFontStyle(run),
+          textDecoration: textDecoration(run),
+          lineHeight: 1.25,
+          listening: true,
+        });
+        x += node.measureSize(run.text).width;
+        group.add(node);
+      }
+      maxWidth = Math.max(maxWidth, x);
+      y += lineHeight;
+    }
+
+    const hit = new Konva.Rect({
+      x: 0,
+      y: 0,
+      width: Math.max(maxWidth, 1),
+      height: Math.max(y, 1),
+      fill: '#000',
+      opacity: 0.001,
+      name: 'text-hit',
+      listening: true,
+    });
+    group.add(hit);
+    hit.moveToBottom();
   }
 
   _createImageNode(object) {
@@ -1224,8 +1288,15 @@ export class Board {
     const entry = this.objects.get(objectId);
     if (!entry || entry.data.type !== 'text') return;
     entry.data = { ...entry.data, ...patch };
-    const text = entry.node.findOne('Text');
-    if (text) this._applyTextStyle(text, entry.data);
+    if (Array.isArray(entry.data.runs) && entry.data.runs.length) {
+      const base = textBaseStyle(entry.data);
+      entry.data.runs = entry.data.runs.map((run) => ({
+        text: run.text,
+        ...normalizeTextStyle({ ...run, ...patch }, base),
+      }));
+    }
+    this._renderTextNode(entry.node, entry.data);
+    this._applyLockBadge(entry);
     this.contentLayer.batchDraw();
   }
 
@@ -1266,8 +1337,7 @@ export class Board {
     node.scale({ x: 1, y: 1 });
 
     if (entry.data.type === 'text') {
-      const text = node.findOne('Text');
-      if (text) this._applyTextStyle(text, entry.data);
+      this._renderTextNode(node, entry.data);
     } else if (entry.data.type === 'shape') {
       this._resizeShapeNode(node, entry.data);
       this._applyBlockLabel(node, entry.data);

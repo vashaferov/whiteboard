@@ -215,6 +215,18 @@ TEXT_FONT_VALUES = ("sans", "serif", "mono", "hand", "narrow")
 TextFontFamily = Literal["sans", "serif", "mono", "hand", "narrow"]
 
 
+class TextRun(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=2000)
+    color: str = Field(pattern=COLOR_PATTERN)
+    fontSize: float = Field(ge=8, le=200)
+    fontFamily: TextFontFamily = "sans"
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+
+
 class TextAdd(_Message):
     type: Literal["text_add"]
     objectId: str = Field(pattern=OBJECT_ID_PATTERN)
@@ -227,6 +239,13 @@ class TextAdd(_Message):
     bold: bool = False
     italic: bool = False
     underline: bool = False
+    runs: list[TextRun] = Field(default_factory=list, max_length=500)
+
+    @model_validator(mode="after")
+    def _check_runs(self) -> TextAdd:
+        if self.runs and "".join(run.text for run in self.runs) != self.content:
+            raise ValueError("Фрагменты не совпадают с текстом")
+        return self
 
 
 class ImageAdd(_Message):
@@ -331,6 +350,19 @@ class TextUpdate(_Message):
     type: Literal["text_update"]
     objectId: str = Field(pattern=OBJECT_ID_PATTERN)
     content: str = Field(min_length=1, max_length=2000)
+    runs: list[TextRun] = Field(default_factory=list, max_length=500)
+    fontFamily: TextFontFamily | None = None
+    fontSize: float | None = Field(default=None, ge=8, le=200)
+    color: str | None = Field(default=None, pattern=COLOR_PATTERN)
+    bold: bool | None = None
+    italic: bool | None = None
+    underline: bool | None = None
+
+    @model_validator(mode="after")
+    def _check_runs(self) -> TextUpdate:
+        if self.runs and "".join(run.text for run in self.runs) != self.content:
+            raise ValueError("Фрагменты не совпадают с текстом")
+        return self
 
 
 class TextStyle(_Message):

@@ -163,6 +163,16 @@ export async function clickWorld(page, point) {
   await page.mouse.click(target.x, target.y);
 }
 
+/** Waits two animation frames so the board settles after layout changes. */
+export async function settleBoard(page) {
+  await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve(null)));
+      }),
+  );
+}
+
 export async function dblclickWorld(page, point) {
   const target = await worldToScreen(page, point);
   await page.mouse.dblclick(target.x, target.y);
