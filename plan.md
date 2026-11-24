@@ -521,6 +521,25 @@
   текста вынесена над доком, чтобы не ломать прокрутку инструментов.
 - [x] Тесты: 239 backend-тестов и 68 E2E-сценариев.
 
+### P18. Форматирование выделенного фрагмента текста ✅
+
+- [x] У объекта `text` появилось поле `runs`: массив фрагментов, каждый хранит
+  `text`, `color`, `fontSize`, `fontFamily`, `bold`, `italic`, `underline`.
+  Пустой `runs` означает однородный текст, который рисуется базовым стилем
+  объекта (как раньше).
+- [x] Редактор текста стал `contenteditable`: `Ж/К/Ч`, цвет, размер и семейство
+  применяются только к выделенному фрагменту, остальной текст сохраняет стиль.
+  `Enter` по-прежнему переносит строку, `Ctrl/Cmd+Enter` завершает ввод,
+  `Escape` отменяет; лимит 2000 символов проверяется при сохранении.
+- [x] Konva рисует несколько фрагментов по строкам с ручной раскладкой и общей
+  прозрачной областью попадания; однородный текст остаётся одним `Konva.Text`.
+  Смена `text_style` для всего объекта применяет патч ко всем фрагментам,
+  не затирая их остальные атрибуты.
+- [x] `text_update`/`text_add` несут `runs` и базовый стиль; сервер проверяет,
+  что сумма фрагментов совпадает с текстом, пишет правку в историю и рассылает
+  её ученикам. Презентация, чужие и заблокированные тексты менять нельзя.
+- [x] Тесты: 243 backend-теста и 69 E2E-сценариев.
+
 ### Критерии готовности итерации
 
 1. `pytest`, `ruff`, `black` — зелёные; E2E-набор проходит на двух браузерах и мобильном viewport.
@@ -583,6 +602,7 @@
 | Ластик, Ctrl+Z и лассо | ✅ | `api/ws.py` (`objects_delete`, `objects_move`), `frontend/js/{board,tools,main}.js` (геометрия ластика, лассо, group drag), `e2e/tests/eraser-lasso.spec.js`; 235 backend-тестов, 66 E2E-сценариев |
 | Панель слайдов и цвет холста | ✅ | `frontend/{index.html,css/room.css}` (панель в `#board`), `models/schemas.py` (`WorkspaceBackground`), `services/{workspaces,room_manager}.py`, `api/ws.py` (`workspace_background`), `frontend/js/{board,main}.js`; `e2e/tests/{presentations,board-size}.spec.js`; 238 backend-тестов, 67 E2E-сценариев |
 | Многострочный текст и стили | ✅ | `models/schemas.py` (`TextStyle`, `bold`/`italic`/`underline`), `api/ws.py` (`_handle_text_style`), `frontend/js/{board,tools,main}.js`, `frontend/{index.html,css/room.css}`, `e2e/tests/text-fonts.spec.js`; 239 backend-тестов, 68 E2E-сценариев |
+| Форматирование фрагмента текста | ✅ | `models/schemas.py` (`TextRun`, `runs`), `api/ws.py` (`_handle_text_update`, `_handle_text_style`), `frontend/js/{text-runs,rich-text,board,main}.js`, `frontend/{index.html,css/style.css}`, `e2e/tests/text-fonts.spec.js`; 243 backend-теста, 69 E2E-сценариев |
 | 11. Пилот | ⛔ | Не начат |
 
 **Проверка Docker (эта итерация):**
