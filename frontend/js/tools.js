@@ -54,6 +54,10 @@ export class ToolManager {
     this.color = '#2563eb';
     this.width = 4;
     this.fontFamily = 'sans';
+    this.fontSize = 24;
+    this.bold = false;
+    this.italic = false;
+    this.underline = false;
     this.stroke = null;
     this.shape = null;
     this.pendingTouch = null;
@@ -89,11 +93,24 @@ export class ToolManager {
     this.fontFamily = fontFamily;
   }
 
+  setFontSize(fontSize) {
+    this.fontSize = fontSize;
+  }
+
+  setTextFormat(patch) {
+    for (const name of ['bold', 'italic', 'underline']) {
+      if (patch[name] !== undefined) this[name] = Boolean(patch[name]);
+    }
+  }
+
   getTextStyle() {
     return {
       color: this.color,
-      fontSize: Math.min(96, Math.max(16, Math.round(this.width * 6))),
+      fontSize: this.fontSize,
       fontFamily: this.fontFamily,
+      bold: this.bold,
+      italic: this.italic,
+      underline: this.underline,
     };
   }
 

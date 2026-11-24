@@ -458,15 +458,52 @@
                 </label>
               </div>
             </div>
-            <label class="font-control" title="Шрифт" hidden>
-              <select id="font-select" aria-label="Шрифт">
+            <div class="font-control" hidden>
+              <select id="font-select" aria-label="Шрифт" title="Шрифт">
                 <option value="sans">Обычный</option>
                 <option value="serif">С засечками</option>
                 <option value="mono">Моноширинный</option>
                 <option value="hand">Рукописный</option>
                 <option value="narrow">Узкий</option>
               </select>
-            </label>
+              <input
+                id="font-size"
+                class="font-size"
+                type="number"
+                min="8"
+                max="200"
+                step="1"
+                value="24"
+                aria-label="Размер шрифта"
+                title="Размер шрифта"
+              />
+              <div class="text-format" role="group" aria-label="Начертание">
+                <button
+                  id="text-bold"
+                  class="text-format__btn"
+                  type="button"
+                  aria-label="Жирный"
+                  aria-pressed="false"
+                  title="Жирный"
+                >Ж</button>
+                <button
+                  id="text-italic"
+                  class="text-format__btn"
+                  type="button"
+                  aria-label="Курсив"
+                  aria-pressed="false"
+                  title="Курсив"
+                >К</button>
+                <button
+                  id="text-underline"
+                  class="text-format__btn"
+                  type="button"
+                  aria-label="Подчёркнутый"
+                  aria-pressed="false"
+                  title="Подчёркнутый"
+                >Ч</button>
+              </div>
+            </div>
             <button id="undo-btn" class="btn btn--ghost dock-icon" type="button" title="Отменить (Ctrl+Z)" aria-label="Отменить">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M9 7L4 12l5 5" />

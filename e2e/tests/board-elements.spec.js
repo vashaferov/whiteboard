@@ -154,7 +154,7 @@ test('eraser: removes strokes, shapes, text and images', async ({ browser, reque
   await teacher.click('[data-tool="text"]');
   await clickWorld(teacher, { x: 800, y: 600 });
   await teacher.fill('#text-editor', 'Стереть меня');
-  await teacher.press('#text-editor', 'Enter');
+  await teacher.press('#text-editor', 'Control+Enter');
   await expect.poll(() => objectCount(teacher)).toBe(1);
   await teacher.click('[data-tool="eraser"]');
   await eraseAt(teacher, { x: 810, y: 606 });
@@ -224,7 +224,7 @@ test('flowchart: blocks with labels and free arrows', async ({ browser, request 
   await dblclickWorld(teacher, { x: 260, y: 230 });
   await expect(teacher.locator('#text-editor')).toBeVisible();
   await teacher.fill('#text-editor', 'Процесс');
-  await teacher.press('#text-editor', 'Enter');
+  await teacher.press('#text-editor', 'Control+Enter');
 
   const hasLabel = () =>
     teacher.evaluate(

@@ -1,4 +1,4 @@
-"""Шрифты объектов «Текст»."""
+"""Стили объектов «Текст»: шрифт, размер, цвет и начертание."""
 
 from __future__ import annotations
 
@@ -21,7 +21,13 @@ def text(object_id: str = "t1", **overrides) -> dict:
     return payload
 
 
-def test_text_created_with_font_and_default(client: TestClient, login_user) -> None:
+def style(object_id: str = "t1", **overrides) -> dict:
+    payload = {"type": "text_style", "objectId": object_id}
+    payload.update(overrides)
+    return payload
+
+
+def test_text_created_with_style_and_default(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
@@ -29,17 +35,39 @@ def test_text_created_with_font_and_default(client: TestClient, login_user) -> N
         sw.receive_json()
         barrier(tw)
 
-        tw.send_json(text("t1", fontFamily="serif"))
-        assert recv_until(sw, "text_add")["object"]["fontFamily"] == "serif"
+        tw.send_json(
+            text(
+                "t1",
+                fontFamily="serif",
+                fontSize=32,
+                color="#dc2626",
+                bold=True,
+                italic=True,
+                underline=True,
+            )
+        )
+        created = recv_until(sw, "text_add")["object"]
+        assert created["fontFamily"] == "serif"
+        assert created["fontSize"] == 32
+        assert created["color"] == "#dc2626"
+        assert created["bold"] is True
+        assert created["italic"] is True
+        assert created["underline"] is True
 
         tw.send_json(text("t2"))
-        assert recv_until(sw, "text_add")["object"]["fontFamily"] == "sans"
+        default = recv_until(sw, "text_add")["object"]
+        assert default["fontFamily"] == "sans"
+        assert default["bold"] is False
+        assert default["italic"] is False
+        assert default["underline"] is False
 
         tw.send_json(text("t3", fontFamily="comic"))
         assert recv_until(tw, "error")["code"] == "invalid_message"
+        tw.send_json(text("t4", fontSize=500))
+        assert recv_until(tw, "error")["code"] == "invalid_message"
 
 
-def test_font_change_permissions_and_broadcast(client: TestClient, login_user) -> None:
+def test_style_change_permissions_and_broadcast(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     student = login_user("Ученик", "student")
     with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
@@ -49,46 +77,96 @@ def test_font_change_permissions_and_broadcast(client: TestClient, login_user) -
         tw.send_json(text("t1"))
         recv_until(sw, "text_add")
 
-        sw.send_json({"type": "text_font", "objectId": "t1", "fontFamily": "mono"})
+        sw.send_json(style("t1", bold=True))
         assert codes(barrier(sw)) == ["forbidden"]
 
-        tw.send_json({"type": "text_font", "objectId": "t1", "fontFamily": "mono"})
-        changed = recv_until(sw, "text_font")
-        assert changed["objectId"] == "t1"
+        tw.send_json(
+            style(
+                "t1",
+                fontFamily="mono",
+                fontSize=40,
+                color="#2563eb",
+                bold=True,
+                italic=True,
+                underline=True,
+            )
+        )
+        changed = recv_until(sw, "text_style")["object"]
         assert changed["fontFamily"] == "mono"
+        assert changed["fontSize"] == 40
+        assert changed["color"] == "#2563eb"
+        assert changed["bold"] is True
+        assert changed["italic"] is True
+        assert changed["underline"] is True
+
+        tw.send_json(style("t1", bold=False, italic=False, underline=False))
+        cleared = recv_until(sw, "text_style")["object"]
+        assert cleared["bold"] is False
+        assert cleared["italic"] is False
+        assert cleared["underline"] is False
 
         tw.send_json(shape("s1"))
         recv_until(sw, "shape_add")
-        tw.send_json({"type": "text_font", "objectId": "s1", "fontFamily": "serif"})
+        tw.send_json(style("s1", bold=True))
         assert codes(barrier(tw)) == ["not_text"]
 
         tw.send_json({"type": "object_lock", "objectId": "t1", "locked": True})
         recv_until(sw, "object_lock")
-        sw.send_json({"type": "text_font", "objectId": "t1", "fontFamily": "narrow"})
+        sw.send_json(style("t1", fontSize=18))
         assert "locked" in codes(barrier(sw))
-        tw.send_json({"type": "text_font", "objectId": "t1", "fontFamily": "narrow"})
+        tw.send_json(style("t1", fontSize=18))
         assert "locked" in codes(barrier(tw))
 
         tw.send_json({"type": "object_lock", "objectId": "t1", "locked": False})
         recv_until(sw, "object_lock")
-        tw.send_json({"type": "text_font", "objectId": "t1", "fontFamily": "narrow"})
-        assert recv_until(sw, "text_font")["fontFamily"] == "narrow"
+        tw.send_json(style("t1", fontSize=18))
+        assert recv_until(sw, "text_style")["object"]["fontSize"] == 18
 
 
-def test_font_change_is_undoable(client: TestClient, login_user) -> None:
+def test_style_change_is_undoable(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     with ws_connect(client, teacher["token"]) as tw:
         tw.receive_json()
         barrier(tw)
         tw.send_json(text("t1", fontFamily="serif"))
         barrier(tw)
-        tw.send_json({"type": "text_font", "objectId": "t1", "fontFamily": "mono"})
+        tw.send_json(
+            style(
+                "t1",
+                fontFamily="mono",
+                fontSize=40,
+                color="#dc2626",
+                bold=True,
+                italic=True,
+                underline=True,
+            )
+        )
         barrier(tw)
 
         tw.send_json({"type": "undo"})
         restored = recv_until(tw, "objects_restored")
         assert restored["removedIds"] == []
-        assert restored["objects"][0]["object"]["fontFamily"] == "serif"
+        restored_object = restored["objects"][0]["object"]
+        assert restored_object["fontFamily"] == "serif"
+        assert restored_object["fontSize"] == 24
+        assert restored_object["color"] == "#111827"
+        assert restored_object["bold"] is False
+        assert restored_object["italic"] is False
+        assert restored_object["underline"] is False
 
         tw.send_json({"type": "undo"})
         assert recv_until(tw, "objects_restored")["removedIds"] == ["t1"]
+
+
+def test_empty_style_is_rejected(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    with ws_connect(client, teacher["token"]) as tw:
+        tw.receive_json()
+        barrier(tw)
+        tw.send_json(text("t1"))
+        barrier(tw)
+
+        tw.send_json(style("t1"))
+        assert tw.receive_json()["code"] == "invalid_message"
+        tw.send_json(style("t1", color="red"))
+        assert tw.receive_json()["code"] == "invalid_message"

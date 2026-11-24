@@ -504,11 +504,12 @@
 #app .font-control {
   display: flex;
   align-items: center;
+  gap: 4px;
 }
 
 #app .font-control select {
   height: 34px;
-  max-width: 138px;
+  max-width: 110px;
   padding: 0 8px;
   border: 1px solid var(--room-border);
   border-radius: 8px;
@@ -516,6 +517,52 @@
   color: #334155;
   font: inherit;
   font-size: 11.5px;
+}
+
+#app .font-size {
+  width: 52px;
+  height: 34px;
+  padding: 0 4px;
+  border: 1px solid var(--room-border);
+  border-radius: 8px;
+  background: var(--room-surface);
+  color: #334155;
+  font: inherit;
+  font-size: 11.5px;
+  text-align: center;
+}
+
+#app .text-format {
+  display: flex;
+  gap: 2px;
+}
+
+#app .text-format__btn {
+  width: 30px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--room-border);
+  border-radius: 8px;
+  background: var(--room-surface);
+  color: #334155;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#app .text-format__btn:hover {
+  background: #f8fafc;
+}
+
+#app .text-format__btn.is-active {
+  border-color: var(--room-accent);
+  background: #eef2ff;
+  color: var(--room-accent);
+}
+
+#app .text-format__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 #app .font-control[hidden] {
@@ -1573,6 +1620,24 @@
     z-index: 95;
     border-radius: 16px;
     padding: 16px;
+  }
+
+  #app .font-control {
+    position: fixed;
+    right: 10px;
+    bottom: 84px;
+    left: 10px;
+    z-index: 15;
+    justify-content: center;
+    padding: 10px;
+    border: 1px solid var(--room-border);
+    border-radius: 16px;
+    background: var(--room-surface);
+    box-shadow: var(--room-shadow-lg);
+  }
+
+  #app .font-control select {
+    max-width: none;
   }
 
   #app .frame-panel {

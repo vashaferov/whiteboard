@@ -206,6 +206,10 @@ function cacheElements() {
   els.colors = $('#colors');
   els.fontControl = $('#font-select')?.closest('.font-control');
   els.fontSelect = $('#font-select');
+  els.fontSize = $('#font-size');
+  els.textBold = $('#text-bold');
+  els.textItalic = $('#text-italic');
+  els.textUnderline = $('#text-underline');
   els.widthRange = $('#width-range');
   els.widthValue = $('#width-value');
   els.clearBtn = $('#clear-btn');
@@ -437,16 +441,21 @@ function bindToolbar() {
   els.fontSelect?.addEventListener('change', () => {
     const fontFamily = els.fontSelect.value;
     state.tools?.setFontFamily(fontFamily);
-    const id = state.board?.getSelectedId();
-    const object = id ? state.board.getObjectData(id) : null;
-    if (isPresentation() || !object || object.type !== 'text' || !canEditObject(object)) {
-      updateFontControl();
-      return;
-    }
-    state.board.setTextFont(id, fontFamily);
-    sendWorkspace({ type: 'text_font', objectId: id, fontFamily });
+    applyTextStyle({ fontFamily });
     updateFontControl();
   });
+
+  els.fontSize?.addEventListener('change', () => {
+    const fontSize = clampFontSize(els.fontSize.value);
+    els.fontSize.value = String(fontSize);
+    state.tools?.setFontSize(fontSize);
+    applyTextStyle({ fontSize });
+    updateFontControl();
+  });
+
+  for (const [name, button] of Object.entries(textFormatButtons())) {
+    button?.addEventListener('click', () => toggleTextFormat(name));
+  }
 
   els.clearBtn.addEventListener('click', () => {
     if (!state.permissions.canClear || !state.board) return;
@@ -504,6 +513,36 @@ function canDeleteObject(object) {
   return object.author === state.user.id;
 }
 
+function textFormatButtons() {
+  return { bold: els.textBold, italic: els.textItalic, underline: els.textUnderline };
+}
+
+function clampFontSize(value) {
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return 24;
+  return Math.min(200, Math.max(8, parsed));
+}
+
+function applyTextStyle(patch) {
+  if (isPresentation()) return false;
+  const id = state.board?.getSelectedId();
+  const object = id ? state.board.getObjectData(id) : null;
+  if (!object || object.type !== 'text' || !canEditObject(object)) return false;
+  state.board.setTextStyle(id, patch);
+  sendWorkspace({ type: 'text_style', objectId: id, ...patch });
+  return true;
+}
+
+function toggleTextFormat(name) {
+  const id = state.board?.getSelectedId();
+  const object = id ? state.board.getObjectData(id) : null;
+  const current = object?.type === 'text' ? object[name] : state.tools?.[name];
+  const value = !current;
+  state.tools?.setTextFormat({ [name]: value });
+  applyTextStyle({ [name]: value });
+  updateFontControl();
+}
+
 function updateFontControl() {
   if (!els.fontControl) return;
   const presentation = isPresentation();
@@ -513,10 +552,19 @@ function updateFontControl() {
   const visible = Boolean(selected) || (!presentation && state.tool === 'text');
   els.fontControl.hidden = !visible;
   if (!visible) return;
-  els.fontSelect.value = selected
-    ? selected.fontFamily || 'sans'
-    : state.tools?.fontFamily || 'sans';
-  els.fontSelect.disabled = Boolean(selected) && !canEditObject(selected);
+  const style = selected ?? state.tools?.getTextStyle() ?? {};
+  els.fontSelect.value = style.fontFamily || 'sans';
+  els.fontSize.value = String(clampFontSize(style.fontSize ?? 24));
+  const locked = Boolean(selected) && !canEditObject(selected);
+  els.fontSelect.disabled = locked;
+  els.fontSize.disabled = locked;
+  for (const [name, button] of Object.entries(textFormatButtons())) {
+    if (!button) continue;
+    const active = Boolean(style[name]);
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+    button.disabled = locked;
+  }
 }
 
 function lockedFor(object) {
@@ -712,6 +760,8 @@ function buildPalette() {
       updatePalette();
       updateStyleButton();
       state.tools?.setStyle({ color });
+      applyTextStyle({ color });
+      updateFontControl();
     });
     els.colors.appendChild(button);
   }
@@ -1061,7 +1111,7 @@ async function exportPdf() {
 function bindTextEditor() {
   els.textEditor.addEventListener('keydown', (event) => {
     event.stopPropagation();
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       commitText();
     } else if (event.key === 'Escape') {
@@ -1084,10 +1134,9 @@ function bindTextEditor() {
 
 function openTextEditor(point) {
   if (!state.board || !state.tools) return;
-  const style = state.tools.getTextStyle();
   state.textEditObjectId = null;
   state.textPoint = point;
-  showTextEditorAt(point.x, point.y, style.fontSize, style.color, '', style.fontFamily);
+  showTextEditorAt(point.x, point.y, state.tools.getTextStyle(), '');
 }
 
 function openTextEditorForObject(object) {
@@ -1099,17 +1148,17 @@ function openTextEditorForObject(object) {
   }
   state.textEditObjectId = object.id;
   state.textPoint = null;
-  showTextEditorAt(
-    object.x,
-    object.y,
-    object.fontSize || 24,
-    object.color || state.color,
-    object.content || '',
-    object.fontFamily || 'sans',
-  );
+  showTextEditorAt(object.x, object.y, {
+    color: object.color || state.color,
+    fontSize: object.fontSize || 24,
+    fontFamily: object.fontFamily || 'sans',
+    bold: Boolean(object.bold),
+    italic: Boolean(object.italic),
+    underline: Boolean(object.underline),
+  }, object.content || '');
 }
 
-function showTextEditorAt(x, y, fontSize, color, value, fontFamily = 'sans') {
+function showTextEditorAt(x, y, style, value) {
   const local = state.board.toScreen({ x, y });
   const container = els.board.getBoundingClientRect();
   const scale = state.board.scale;
@@ -1119,9 +1168,12 @@ function showTextEditorAt(x, y, fontSize, color, value, fontFamily = 'sans') {
   els.textEditor.style.left = `${container.left + local.x}px`;
   els.textEditor.style.top = `${container.top + local.y}px`;
   els.textEditor.style.width = `${Math.max(180, Math.min(420, 320 * scale))}px`;
-  els.textEditor.style.fontSize = `${fontSize * scale}px`;
-  els.textEditor.style.fontFamily = fontStack(fontFamily);
-  els.textEditor.style.color = color;
+  els.textEditor.style.fontSize = `${style.fontSize * scale}px`;
+  els.textEditor.style.fontFamily = fontStack(style.fontFamily);
+  els.textEditor.style.fontWeight = style.bold ? '700' : '400';
+  els.textEditor.style.fontStyle = style.italic ? 'italic' : 'normal';
+  els.textEditor.style.textDecoration = style.underline ? 'underline' : 'none';
+  els.textEditor.style.color = style.color;
   els.textEditor.style.height = 'auto';
   requestAnimationFrame(() => {
     els.textEditor.focus({ preventScroll: true });
@@ -1158,6 +1210,9 @@ function commitText() {
     color: style.color,
     fontSize: style.fontSize,
     fontFamily: style.fontFamily,
+    bold: style.bold,
+    italic: style.italic,
+    underline: style.underline,
     rotation: 0,
     author: state.user?.id ?? null,
   };
@@ -1171,6 +1226,9 @@ function commitText() {
     color: style.color,
     fontSize: style.fontSize,
     fontFamily: style.fontFamily,
+    bold: style.bold,
+    italic: style.italic,
+    underline: style.underline,
   });
 }
 
@@ -1336,7 +1394,7 @@ function handleServerEvent(message) {
     case 'object_update':
     case 'object_transform':
     case 'text_update':
-    case 'text_font':
+    case 'text_style':
     case 'object_delete':
     case 'object_lock':
     case 'objects_restored':
@@ -1437,10 +1495,8 @@ function applyObjectEvent(message) {
       break;
     case 'object_transform':
     case 'text_update':
+    case 'text_style':
       board.applyObjectTransform(message.object);
-      break;
-    case 'text_font':
-      board.setTextFont(message.objectId, message.fontFamily);
       updateFontControl();
       break;
     case 'object_delete':
