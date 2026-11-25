@@ -307,6 +307,62 @@ def test_style_patch_updates_every_run_and_keeps_other_formatting(
         assert all(item["bold"] is False for item in cleared["runs"])
 
 
+def test_text_resize_scales_every_run_and_is_undoable(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+    with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
+        tw.receive_json()
+        sw.receive_json()
+        barrier(tw)
+        runs = [run("Привет "), run("мир", fontSize=32, bold=True)]
+        tw.send_json(text("t1", content="Привет мир", runs=runs))
+        recv_until(sw, "text_add")
+
+        tw.send_json(
+            {
+                "type": "object_transform",
+                "objectId": "t1",
+                "x": 10,
+                "y": 20,
+                "rotation": 0,
+                "fontSize": 48,
+            }
+        )
+        resized = recv_until(sw, "object_transform")["object"]
+        assert resized["fontSize"] == 48
+        assert [item["fontSize"] for item in resized["runs"]] == [48, 64]
+        assert resized["runs"][1]["bold"] is True
+
+        tw.send_json({"type": "undo"})
+        restored = recv_until(tw, "objects_restored")["objects"][0]["object"]
+        assert restored["fontSize"] == 24
+        assert [item["fontSize"] for item in restored["runs"]] == [24, 32]
+
+
+def test_text_resize_keeps_uniform_text_without_runs(client: TestClient, login_user) -> None:
+    teacher = login_user("Учитель", "teacher")
+    student = login_user("Ученик", "student")
+    with ws_connect(client, teacher["token"]) as tw, ws_connect(client, student["token"]) as sw:
+        tw.receive_json()
+        sw.receive_json()
+        barrier(tw)
+        tw.send_json(text("t1", content="Текст"))
+        recv_until(sw, "text_add")
+        tw.send_json(
+            {
+                "type": "object_transform",
+                "objectId": "t1",
+                "x": 10,
+                "y": 20,
+                "rotation": 0,
+                "fontSize": 32,
+            }
+        )
+        resized = recv_until(sw, "object_transform")["object"]
+        assert resized["fontSize"] == 32
+        assert not resized.get("runs")
+
+
 def test_empty_style_is_rejected(client: TestClient, login_user) -> None:
     teacher = login_user("Учитель", "teacher")
     with ws_connect(client, teacher["token"]) as tw:

@@ -535,10 +535,14 @@
   прозрачной областью попадания; однородный текст остаётся одним `Konva.Text`.
   Смена `text_style` для всего объекта применяет патч ко всем фрагментам,
   не затирая их остальные атрибуты.
+- [x] Изменение размера блока масштабирует базовый размер и все `runs` одним
+  коэффициентом: клиент и сервер пересчитывают фрагменты, сохраняя пропорции,
+  начертание и цвет. Повторная отрисовка текста полностью удаляет старые
+  сегменты, поэтому размер не сбрасывается и не дублируется.
 - [x] `text_update`/`text_add` несут `runs` и базовый стиль; сервер проверяет,
   что сумма фрагментов совпадает с текстом, пишет правку в историю и рассылает
   её ученикам. Презентация, чужие и заблокированные тексты менять нельзя.
-- [x] Тесты: 243 backend-теста и 69 E2E-сценариев.
+- [x] Тесты: 245 backend-тестов и 69 E2E-сценариев.
 
 ### Критерии готовности итерации
 
@@ -602,7 +606,7 @@
 | Ластик, Ctrl+Z и лассо | ✅ | `api/ws.py` (`objects_delete`, `objects_move`), `frontend/js/{board,tools,main}.js` (геометрия ластика, лассо, group drag), `e2e/tests/eraser-lasso.spec.js`; 235 backend-тестов, 66 E2E-сценариев |
 | Панель слайдов и цвет холста | ✅ | `frontend/{index.html,css/room.css}` (панель в `#board`), `models/schemas.py` (`WorkspaceBackground`), `services/{workspaces,room_manager}.py`, `api/ws.py` (`workspace_background`), `frontend/js/{board,main}.js`; `e2e/tests/{presentations,board-size}.spec.js`; 238 backend-тестов, 67 E2E-сценариев |
 | Многострочный текст и стили | ✅ | `models/schemas.py` (`TextStyle`, `bold`/`italic`/`underline`), `api/ws.py` (`_handle_text_style`), `frontend/js/{board,tools,main}.js`, `frontend/{index.html,css/room.css}`, `e2e/tests/text-fonts.spec.js`; 239 backend-тестов, 68 E2E-сценариев |
-| Форматирование фрагмента текста | ✅ | `models/schemas.py` (`TextRun`, `runs`), `api/ws.py` (`_handle_text_update`, `_handle_text_style`), `frontend/js/{text-runs,rich-text,board,main}.js`, `frontend/{index.html,css/style.css}`, `e2e/tests/text-fonts.spec.js`; 243 backend-теста, 69 E2E-сценариев |
+| Форматирование фрагмента текста | ✅ | `models/schemas.py` (`TextRun`, `runs`), `api/ws.py` (`_handle_text_update`, `_handle_text_style`, `_scaled_runs`), `frontend/js/{text-runs,rich-text,board,main}.js`, `frontend/{index.html,css/style.css}`, `e2e/tests/text-fonts.spec.js`; 245 backend-тестов, 69 E2E-сценариев |
 | 11. Пилот | ⛔ | Не начат |
 
 **Проверка Docker (эта итерация):**

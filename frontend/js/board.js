@@ -878,7 +878,7 @@ export class Board {
   }
 
   _renderTextNode(group, object) {
-    for (const child of group.getChildren()) child.destroy();
+    group.destroyChildren();
     const base = textBaseStyle(object);
     const runs = materializeRuns(object.content ?? '', object.runs, base);
     if (!runs.length) return;
@@ -1476,11 +1476,11 @@ export class Board {
       };
 
       if (entry.data.type === 'text') {
-        data.fontSize = clamp(
-          round((entry.data.fontSize ?? 16) * Math.abs(scaleY)),
-          8,
-          200,
-        );
+        const base = entry.data.fontSize ?? 16;
+        const nextSize = clamp(round(base * Math.abs(scaleY)), 8, 200);
+        data.fontSize = nextSize;
+        const runs = this._scaleTextRuns(entry.data, base, nextSize);
+        if (runs) data.runs = runs;
       } else {
         data.width = clamp(round((entry.data.width ?? 0) * scaleX), -10000, 10000);
         data.height = clamp(round((entry.data.height ?? 0) * scaleY), -10000, 10000);
@@ -1490,8 +1490,20 @@ export class Board {
 
       this._applyTransform(entry, data);
       this.transformer.forceUpdate();
-      this.onObjectTransform(entry.data.id, data);
+      const message = { ...data };
+      delete message.runs;
+      this.onObjectTransform(entry.data.id, message);
     });
+  }
+
+  /** Масштабирует размеры фрагментов текста тем же коэффициентом, что и базовый. */
+  _scaleTextRuns(object, base, nextSize) {
+    if (!Array.isArray(object.runs) || !object.runs.length || !(base > 0)) return null;
+    const ratio = nextSize / base;
+    return object.runs.map((run) => ({
+      ...run,
+      fontSize: clamp(round((run.fontSize ?? base) * ratio), 8, 200),
+    }));
   }
 
   removeObject(objectId) {
