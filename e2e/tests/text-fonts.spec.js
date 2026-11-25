@@ -2,12 +2,14 @@ import { expect, test } from '@playwright/test';
 
 import {
   dblclickWorld,
+  dragBy,
   lessonSetup,
   objectCount,
   openRoom,
   reloadAndWait,
   settleBoard,
   signInWith,
+  transformerAnchor,
   worldToScreen,
 } from '../helpers.js';
 
@@ -256,8 +258,35 @@ test('text: formatting applies only to the selected fragment', async ({
   await expectFragment(teacher);
   await expectFragment(student);
 
+  // Resizing the block scales the base size and every fragment together.
+  await teacher.click('[data-tool="select"]');
+  await settleBoard(teacher);
+  await teacher.mouse.click(textPoint.x, textPoint.y);
+  await settleBoard(teacher);
+  await dragBy(teacher, await transformerAnchor(teacher, 'bottom-right'), 0, 12);
+
+  const expectScaled = async (page) => {
+    await expect
+      .poll(async () => (await textSegments(page))[0]?.fontSize ?? 0)
+      .toBeGreaterThan(24);
+    const segments = await textSegments(page);
+    expect(segments).toHaveLength(2);
+    expect(segments[1].fontSize / segments[0].fontSize).toBeCloseTo(32 / 24, 1);
+    expect(segments[0].fontStyle).toBe('normal');
+    expect(segments[1].fontStyle).toBe('bold');
+    expect(segments[1].fill).toBe('#dc2626');
+    return segments;
+  };
+
+  const resized = await expectScaled(teacher);
+  await expect
+    .poll(async () => (await textSegments(student))[0]?.fontSize ?? 0)
+    .toBeCloseTo(resized[0].fontSize, 0);
+  await expectScaled(student);
+
   await reloadAndWait(teacher);
-  await expectFragment(teacher);
+  const reloaded = await expectScaled(teacher);
+  expect(reloaded[0].fontSize).toBeCloseTo(resized[0].fontSize, 1);
 
   await teacherContext.close();
   await studentContext.close();

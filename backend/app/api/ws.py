@@ -983,6 +983,16 @@ async def _handle_object_update(
     )
 
 
+def _scaled_runs(runs: list[dict[str, Any]], previous: float, size: float) -> list[dict[str, Any]]:
+    """Пропорционально меняет размер каждого фрагмента при масштабировании текста."""
+    ratio = size / previous
+    scaled: list[dict[str, Any]] = []
+    for run in runs:
+        value = float(run.get("fontSize") or previous) * ratio
+        scaled.append({**run, "fontSize": round(min(200.0, max(8.0, value)), 2)})
+    return scaled
+
+
 async def _handle_object_transform(
     manager: RoomManager,
     room: Room,
@@ -1016,7 +1026,11 @@ async def _handle_object_transform(
     }
     if obj.get("type") == "text":
         if message.fontSize is not None:
+            previous = float(obj.get("fontSize") or 16)
             fields["fontSize"] = message.fontSize
+            runs = obj.get("runs")
+            if isinstance(runs, list) and runs and previous > 0:
+                fields["runs"] = _scaled_runs(runs, previous, message.fontSize)
     else:
         if (
             obj.get("type") == "shape"
@@ -1029,16 +1043,12 @@ async def _handle_object_transform(
         if message.height is not None and message.height != 0:
             fields["height"] = message.height
 
-    names = ("x", "y", "frameId")
-    names += (
-        ("rotation", "fontSize")
-        if obj.get("type") == "text"
-        else (
-            "width",
-            "height",
-            "rotation",
-        )
-    )
+    if obj.get("type") == "text":
+        names = ("x", "y", "frameId", "rotation", "fontSize")
+        if obj.get("runs"):
+            names += ("runs",)
+    else:
+        names = ("x", "y", "frameId", "width", "height", "rotation")
     _push_fields(manager, room, user, [obj], names)
     updated = manager.update_object_fields(room, message.objectId, **fields)
     if updated is None:
