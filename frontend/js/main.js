@@ -1027,8 +1027,9 @@ async function uploadImageFile(file) {
 }
 
 function placeUploadedImage(data, { offset = 0 } = {}) {
-  const x = Math.max(0, (state.board.width - data.width) / 2 + offset);
-  const y = Math.max(0, (state.board.height - data.height) / 2 + offset);
+  const center = state.board.viewportCenter();
+  const x = center.x - data.width / 2 + offset;
+  const y = center.y - data.height / 2 + offset;
   const objectId = newId();
 
   state.board.addObject({

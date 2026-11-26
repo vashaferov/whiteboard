@@ -683,6 +683,17 @@ export class Board {
     return { x: pointer.x, y: pointer.y };
   }
 
+  viewportCenter() {
+    const containerWidth = Math.max(1, this.container.clientWidth);
+    const containerHeight = Math.max(1, this.container.clientHeight);
+    const x = (containerWidth / 2 - this.offsetX) / this.scale;
+    const y = (containerHeight / 2 - this.offsetY) / this.scale;
+    if (this.canvasMode === 'fixed') {
+      return { x: clamp(x, 0, this.width), y: clamp(y, 0, this.height) };
+    }
+    return { x, y };
+  }
+
   toScreen(point) {
     return {
       x: this.offsetX + point.x * this.scale,

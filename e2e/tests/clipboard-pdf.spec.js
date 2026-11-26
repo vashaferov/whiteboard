@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import { expect, test } from '@playwright/test';
 
 import {
+  boardBox,
   clickWorld,
+  dragBy,
   drawRect,
   lessonSetup,
   openLesson,
@@ -20,6 +22,29 @@ async function imageCount(page) {
   return page.evaluate(
     () => window.Konva.stages[0].getLayers()[1].getChildren((node) => node.findOne('Image')).length,
   );
+}
+
+async function imageCenter(page) {
+  return page.evaluate(() => {
+    const layer = window.Konva.stages[0].getLayers()[1];
+    const group = layer
+      .getChildren((node) => node.getClassName() === 'Group' && node.findOne('Image'))
+      .at(-1);
+    if (!group) return null;
+    const image = group.findOne('Image');
+    return { x: group.x() + image.width() / 2, y: group.y() + image.height() / 2 };
+  });
+}
+
+async function viewportCenter(page) {
+  return page.evaluate(() => {
+    const stage = window.Konva.stages[0];
+    const scale = stage.scaleX();
+    return {
+      x: (stage.width() / 2 - stage.x()) / scale,
+      y: (stage.height() / 2 - stage.y()) / scale,
+    };
+  });
 }
 
 async function pasteFiles(page, names) {
@@ -54,6 +79,34 @@ test('clipboard: Ctrl+V pastes one and several images', async ({ browser, reques
 
   await pasteFiles(page, ['a.png', 'b.png']);
   await expect.poll(() => imageCount(page)).toBe(3);
+
+  await context.close();
+});
+
+test('clipboard: a pasted image lands at the visible viewport center', async ({
+  browser,
+  request,
+}) => {
+  const setup = await lessonSetup(request, { name: 'Paste center', student: false });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await signInWith(request, page, setup.teacherLogin);
+  await openRoom(page, setup.room.id);
+
+  const box = await boardBox(page);
+  await page.click('[data-tool="select"]');
+  await dragBy(page, { x: box.x + box.width / 2, y: box.y + box.height / 2 }, 320, 180);
+
+  const expected = await viewportCenter(page);
+  expect(expected.x).toBeLessThan(700);
+
+  await pasteFiles(page, ['shot.png']);
+  await expect.poll(() => imageCount(page)).toBe(1);
+
+  const actual = await imageCenter(page);
+  expect(actual).not.toBeNull();
+  expect(actual.x).toBeCloseTo(expected.x, 0);
+  expect(actual.y).toBeCloseTo(expected.y, 0);
 
   await context.close();
 });
